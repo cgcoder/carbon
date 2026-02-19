@@ -1,0 +1,11 @@
+Requirement:
+In this task, we are going to define the data model required for the mocking service.
+
+Data Model:
+- Workspace: Workspace is how users manages different projects that belong to different workspace. Each workspace must stored in a separate directory. There will be a Default workspace. Workspace has a name and description. Metadata must be stored in a workspace.json file.
+
+- Project: project is the high-level entity that the user uses to manage service mocks. Each project should be created in the separate directory in the current folder. Directory name must match project name. Project is only allowed to have spaces, numbers, underscore and dots. No other characters are supported. In the directory create a file called project.json. This file should be used to store all the attributes of a project. A project should have a name and description. A project must belong to a workspace and by default a project will be part of the "Default" workspace.
+
+- Service: A project can have multiple services. Service must belong to a project. Service is stored a directory inside project directory. Service metadata must be stored in a service.json file. User can optionally provide one or more hosts for the service. These proxies can be associated to an environment. For example, we should be able to proxy the request to staging environment or production environment as needed. 
+
+- API: A service consists of multiple API calls. APIs need a name and a description. API name must be unique in a service. User can also pick http method like GET/PUT/DELETE etc., Use can provide a URL matching regex to match to the request URL. For each API user should have the option to route the request to the actual server by selecting the environment where the request should be routed to. To generate mock response, user have 3 different options. (1) To use hard-coded response. (2) To execute Javascript code to generate a json response. (3) Generate library using mustache template library. API metadata and configuration must be stored service directory. All the API information must be stored in a file called apis.json inside the service directory.
