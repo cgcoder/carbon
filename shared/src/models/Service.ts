@@ -18,4 +18,6 @@ export interface Service {
   /** Optional per-environment proxy targets for this service. */
   environments?: ServiceEnvironment[];
   injectLatencyMs?: number;
+  /** Optional URL prefix. If set, incoming requests must start with this prefix for this service to be considered. API urlPattern is then matched against the path with the prefix stripped. */
+  urlPrefix?: string;
 }

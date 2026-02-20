@@ -1,68 +1,47 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Stack, Group, Title, Text, Button, Badge, ActionIcon, Alert,
-  Anchor, Breadcrumbs, Divider,
+  Stack, SimpleGrid, Card, Group, Title, Text, Button, ActionIcon, Alert,
+  Anchor, Breadcrumbs, Badge,
 } from '@mantine/core';
-import { Service, Api } from '@carbon/shared';
+import { Service } from '@carbon/shared';
 import { useWorkspace } from '../context/WorkspaceContext';
-import CreateApiModal from '../components/CreateApiModal';
-import * as api from '../api/client';
 import CreateServiceModal from '../components/CreateServiceModal';
-
-interface ServiceWithApis {
-  service: Service;
-  apis: Api[];
-}
-
-const METHOD_COLOR: Record<string, string> = {
-  GET: 'green', POST: 'blue', PUT: 'orange', PATCH: 'yellow',
-  DELETE: 'red', HEAD: 'gray', OPTIONS: 'violet',
-};
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
+import * as api from '../api/client';
 
 export default function ProjectPage() {
   const { projectName } = useParams<{ projectName: string }>();
   const { activeWorkspace } = useWorkspace();
   const navigate = useNavigate();
-  const [data, setData] = useState<ServiceWithApis[]>([]);
-  const [error, setError] = useState('');
+  const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
+  const [editService, setEditService] = useState<Service | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!projectName) return;
-    setError('');
-    try {
-      const services = await api.getServices(activeWorkspace, projectName);
-      const withApis = await Promise.all(
-        services.map(async service => ({
-          service,
-          apis: await api.getApis(activeWorkspace, projectName, service.name),
-        }))
-      );
-      setData(withApis);
-    } catch (e: any) {
-      setError(e.message);
-    }
-  }, [activeWorkspace, projectName]);
+  const servicesKey = ['services', activeWorkspace, projectName];
 
-  useEffect(() => { load(); }, [load]);
+  const { data: services = [], error } = useQuery({
+    queryKey: servicesKey,
+    queryFn: () => api.getServices(activeWorkspace, projectName!),
+    enabled: !!projectName,
+  });
 
-  const handleDeleteApi = async (svcName: string, apiName: string) => {
-    try {
-      await api.deleteApi(activeWorkspace, projectName!, svcName, apiName);
-      setData(d =>
-        d.map(entry =>
-          entry.service.name === svcName
-            ? { ...entry, apis: entry.apis.filter(a => a.name !== apiName) }
-            : entry
-        )
-      );
-    } catch (e: any) {
-      setError(e.message);
-    }
+  const deleteMutation = useMutation({
+    mutationFn: (name: string) => api.deleteService(activeWorkspace, projectName!, name),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: servicesKey }),
+  });
+
+  const handleEdit = (service: Service, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditService(service);
   };
 
-  const existingServices = data.map(d => d.service.name);
+  const handleDelete = (name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPendingDelete(name);
+  };
 
   return (
     <Stack>
@@ -76,60 +55,80 @@ export default function ProjectPage() {
         <Button onClick={() => setCreateOpen(true)}>New Service</Button>
       </Group>
 
-      {error && <Alert color="red" title="Error" onClose={() => setError('')} withCloseButton>{error}</Alert>}
-
-      {data.length === 0 && (
-        <Text c="dimmed">No APIs yet — create one to get started.</Text>
+      {(error || deleteMutation.error) && (
+        <Alert color="red" title="Error" withCloseButton>
+          {((error || deleteMutation.error) as Error).message}
+        </Alert>
       )}
 
-      {data.map(({ service, apis }) => (
-        <Stack key={service.name} gap="xs">
-          <Group gap="sm">
-            <Text size="sm" fw={600} c="dimmed" tt="uppercase">
-              {service.displayName || service.name}
-            </Text>
-            <Divider style={{ flex: 1 }} />
-          </Group>
-
-          {apis.length === 0 && (
-            <Text size="sm" c="dimmed" pl="sm">No APIs in this service.</Text>
-          )}
-
-          {apis.map(a => (
-            <Group
-              key={a.name}
-              justify="space-between"
-              p="sm"
-              style={{
-                border: '1px solid var(--mantine-color-default-border)',
-                borderRadius: 8,
-              }}
+      {services.length === 0 ? (
+        <Text c="dimmed">No services yet — create one to get started.</Text>
+      ) : (
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
+          {services.map(s => (
+            <Card
+              key={s.name}
+              withBorder
+              style={{ cursor: 'pointer' }}
+              onClick={() => navigate(`/projects/${encodeURIComponent(projectName!)}/services/${encodeURIComponent(s.name)}`)}
             >
-              <Group gap="sm">
-                <Badge color={METHOD_COLOR[a.method] ?? 'gray'} variant="filled" w={72} style={{ textAlign: 'center' }}>
-                  {a.method}
-                </Badge>
-                <Text ff="monospace" size="sm">{a.urlPattern}</Text>
-                <Text size="sm" c="dimmed">{a.name}</Text>
+              <Group justify="space-between" mb="xs" wrap="nowrap">
+                <Text fw={600} truncate>{s.displayName || s.name}</Text>
+                <Group gap={4} wrap="nowrap">
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    onClick={e => handleEdit(s, e)}
+                    title="Edit service"
+                  >
+                    ✎
+                  </ActionIcon>
+                  <ActionIcon
+                    color="red"
+                    variant="subtle"
+                    size="sm"
+                    onClick={e => handleDelete(s.name, e)}
+                    title="Delete service"
+                  >
+                    ×
+                  </ActionIcon>
+                </Group>
               </Group>
-              <ActionIcon
-                color="red"
-                variant="subtle"
-                size="sm"
-                onClick={() => handleDeleteApi(service.name, a.name)}
-                title="Delete API"
-              >
-                ×
-              </ActionIcon>
-            </Group>
+              {s.description && (
+                <Text c="dimmed" size="sm" lineClamp={2} mb="xs">{s.description}</Text>
+              )}
+              {s.hostname && (
+                <Text size="xs" ff="monospace" c="dimmed">{s.hostname}</Text>
+              )}
+              {s.injectLatencyMs ? (
+                <Badge size="xs" variant="light" mt="xs">+{s.injectLatencyMs}ms latency</Badge>
+              ) : null}
+            </Card>
           ))}
-        </Stack>
-      ))}
+        </SimpleGrid>
+      )}
 
-      {createOpen && <CreateServiceModal
-        opened={createOpen}
-        onClose={() => { setCreateOpen(false); load(); }}
-      />}
+      {createOpen && (
+        <CreateServiceModal
+          opened={createOpen}
+          onClose={() => setCreateOpen(false)}
+        />
+      )}
+
+      {editService && (
+        <CreateServiceModal
+          opened={!!editService}
+          service={editService}
+          onClose={() => setEditService(null)}
+        />
+      )}
+
+      <ConfirmDeleteModal
+        opened={!!pendingDelete}
+        entityName={pendingDelete ?? ''}
+        onConfirm={() => deleteMutation.mutate(pendingDelete!)}
+        onClose={() => setPendingDelete(null)}
+      />
     </Stack>
   );
 }

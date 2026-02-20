@@ -8,6 +8,8 @@ export interface CachedEntry {
   project: Project;
   service: Service;
   api: Api;
+  /** Pre-compiled function for script response providers. Undefined for other response types. */
+  compiledScriptFn?: (request: unknown) => unknown;
 }
 
 export class MockConfigCache {
@@ -25,7 +27,16 @@ export class MockConfigCache {
       for (const project of fileStore.getProjects(wsName)) {
         for (const service of fileStore.getServices(wsName, project.name)) {
           for (const api of fileStore.getApis(wsName, project.name, service.name)) {
-            next.push({ workspace, project, service, api });
+            let compiledScriptFn: CachedEntry['compiledScriptFn'];
+            if (api.response.type === 'script') {
+              try {
+                // eslint-disable-next-line no-new-func
+                compiledScriptFn = new Function('request', api.response.script) as CachedEntry['compiledScriptFn'];
+              } catch {
+                // Script has a syntax error; leave compiledScriptFn undefined so the handler can report the error at request time.
+              }
+            }
+            next.push({ workspace, project, service, api, compiledScriptFn });
           }
         }
       }

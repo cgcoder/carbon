@@ -1,19 +1,19 @@
-import { useState, useEffect } from 'react';
 import {
-    Modal, Stack, TextInput, Textarea, NumberInput, Select, Autocomplete,
-    Button, Group, Alert, Text, Title, Divider,
+    Modal, Stack, TextInput,
+    Button, Group, Alert, Divider,
     Checkbox,
 } from '@mantine/core';
 import { HttpMethod, Service } from '@carbon/shared';
 import { useWorkspace } from '../context/WorkspaceContext';
-import * as api from '../api/client';
 import { useFieldArray, useForm } from 'react-hook-form';
-import { useMutation } from '@tanstack/react-query';
-import axios from 'axios';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import * as api from '../api/client';
 
 interface Props {
     opened: boolean;
     onClose: () => void;
+    /** When provided the modal operates in edit mode and name is read-only. */
+    service?: Service;
 }
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
@@ -31,51 +31,58 @@ const DEFAULT_SERVICE: Service = {
     matchHostName: false,
     environments: [],
     injectLatencyMs: 0,
+    urlPrefix: '',
 };
 
-export default function CreateServiceModal({ opened, onClose }: Props) {
+export default function CreateServiceModal({ opened, onClose, service }: Props) {
     const { activeWorkspace, currentProject } = useWorkspace();
+    const queryClient = useQueryClient();
+    const isEdit = !!service;
 
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-
-    const { register, handleSubmit, formState: { errors }, control } = useForm<Service>({ defaultValues: DEFAULT_SERVICE });
+    const { register, handleSubmit, formState: { errors }, control } = useForm<Service>({
+        defaultValues: service ?? DEFAULT_SERVICE,
+    });
     const { fields, append, remove } = useFieldArray({ control, name: 'environments' });
 
-    const mutation = useMutation<Service>({
-        mutationFn: (service) => {
-            return axios.post(`/api/workspaces/${activeWorkspace}/projects/${currentProject}/services`, service)
+    const servicesKey = ['services', activeWorkspace, currentProject];
+
+    const createMutation = useMutation<Service, Error, Service>({
+        mutationFn: (data) => api.createService(activeWorkspace, currentProject!, data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: servicesKey });
+            onClose();
         },
-    })
+    });
 
-    const onSubmit = (data: Service) => {
-        setLoading(true);
-        setError('');
-        try {
-            mutation.mutate(data, {
-                onSuccess: () => {
-                    onClose();
-                }
-            });
+    const updateMutation = useMutation<Service, Error, Omit<Service, 'name'>>({
+        mutationFn: (data) => api.updateService(activeWorkspace, currentProject!, service!.name, data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: servicesKey });
+            onClose();
+        },
+    });
 
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setLoading(false);
+    const mutation = isEdit ? updateMutation : createMutation;
+
+    const onSubmit = ({ name, ...rest }: Service) => {
+        if (isEdit) {
+            updateMutation.mutate(rest);
+        } else {
+            createMutation.mutate({ name, ...rest });
         }
     };
 
-
     return (
-        <Modal opened={opened} onClose={onClose} title="New Service" size="lg">
+        <Modal opened={opened} onClose={onClose} title={isEdit ? 'Edit Service' : 'New Service'} size="lg">
             <form onSubmit={handleSubmit(onSubmit)}>
                 <Stack>
-                    {error && <Alert color="red" title="Error">{error}</Alert>}
+                    {mutation.error && <Alert color="red" title="Error">{mutation.error.message}</Alert>}
                     <Group grow>
                         <TextInput
                             {...register("name", { required: "Name is required" })}
                             placeholder="Name of the service"
                             required
+                            disabled={isEdit}
                         />
                         <TextInput
                             {...register("displayName", { required: "Display Name is required" })}
@@ -101,35 +108,41 @@ export default function CreateServiceModal({ opened, onClose }: Props) {
                             label="Match Host Name"
                         />
                     </Group>
-                    <Divider my="md" />
-                    {
-                        fields.map((field, index) => (
-                            <Group key={field.id} grow>
-                                <TextInput
-                                    {...register(`environments.${index}.environment` as const, { required: "Environment name is required" })}
-                                    placeholder="Environment (e.g. staging, production)"
-                                    required
-                                />
-                                <TextInput
-                                    {...register(`environments.${index}.host` as const, { required: "Host is required" })}
-                                    placeholder="Host URL for this environment"
-                                    required
-                                />
-                                <Checkbox
-                                    {...register(`environments.${index}.useProxyAuth` as const)}
-                                    label="Use Proxy Auth"
-                                />
-                                <Button variant="outline" color="red" onClick={() => remove(index)}>Remove</Button>
-                            </Group>
-                        ))
-                    }
                     <Group grow>
-                        <Button fullWidth={false} variant="outline" onClick={() => append({ environment: '', host: '', useProxyAuth: false })}>Add Environment</Button>
+                        <TextInput
+                            {...register("urlPrefix")}
+                            placeholder="URL prefix (e.g. /api/v1)"
+                        />
+                    </Group>
+                    <Divider my="md" />
+                    {fields.map((field, index) => (
+                        <Group key={field.id} grow>
+                            <TextInput
+                                {...register(`environments.${index}.name` as const, { required: "Environment name is required" })}
+                                placeholder="Environment (e.g. staging, production)"
+                                required
+                            />
+                            <TextInput
+                                {...register(`environments.${index}.host` as const, { required: "Host is required" })}
+                                placeholder="Host URL for this environment"
+                                required
+                            />
+                            <Checkbox
+                                {...register(`environments.${index}.useProxyAuth` as const)}
+                                label="Use Proxy Auth"
+                            />
+                            <Button variant="outline" color="red" onClick={() => remove(index)}>Remove</Button>
+                        </Group>
+                    ))}
+                    <Group grow>
+                        <Button fullWidth={false} variant="outline" onClick={() => append({ name: '', host: '', useProxyAuth: false })}>Add Environment</Button>
                     </Group>
                     <Divider my="md" />
                     <Group justify="flex-end">
                         <Button variant="default" onClick={onClose}>Cancel</Button>
-                        <Button onClick={handleSubmit(onSubmit)} loading={loading}>Create</Button>
+                        <Button onClick={handleSubmit(onSubmit)} loading={mutation.isPending}>
+                            {isEdit ? 'Save' : 'Create'}
+                        </Button>
                     </Group>
                 </Stack>
             </form>

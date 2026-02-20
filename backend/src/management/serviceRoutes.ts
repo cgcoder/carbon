@@ -21,7 +21,7 @@ router.post('/', (req: Request, res: Response) => {
     res.status(404).json({ error: `Project "${proj}" not found` });
     return;
   }
-  const { name, displayName, description, hostname, matchHostName, environments, injectLatencyMs } = req.body;
+  const { name, displayName, description, hostname, matchHostName, environments, injectLatencyMs, urlPrefix } = req.body;
   if (!name || typeof name !== 'string' || name.includes('/') || name.includes('\\')) {
     res.status(400).json({ error: 'name is required and must not contain / or \\' });
     return;
@@ -38,6 +38,7 @@ router.post('/', (req: Request, res: Response) => {
     ...(matchHostName !== undefined && { matchHostName }),
     ...(environments !== undefined && { environments }),
     ...(injectLatencyMs !== undefined && { injectLatencyMs }),
+    ...(urlPrefix !== undefined && { urlPrefix }),
   };
   fileStore.saveService(ws, proj, service);
   res.status(201).json(service);
@@ -66,13 +67,14 @@ router.put('/:service', (req: Request, res: Response) => {
     res.status(404).json({ error: `Service "${svcName}" not found` });
     return;
   }
-  const { displayName, description, hostname, matchHostName, environments, injectLatencyMs } = req.body;
+  const { displayName, description, hostname, matchHostName, environments, injectLatencyMs, urlPrefix } = req.body;
   if (displayName !== undefined) service.displayName = displayName;
   if (description !== undefined) service.description = description;
   if (hostname !== undefined) service.hostname = hostname;
   if (matchHostName !== undefined) service.matchHostName = matchHostName;
   if (environments !== undefined) service.environments = environments;
   if (injectLatencyMs !== undefined) service.injectLatencyMs = injectLatencyMs;
+  if (urlPrefix !== undefined) service.urlPrefix = urlPrefix;
   fileStore.saveService(ws, proj, service);
   res.json(service);
 });

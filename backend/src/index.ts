@@ -9,6 +9,7 @@ import mockRouter from './mock/router';
 // Initialize storage and load mock config cache
 fileStore.init();
 mockConfigCache.load();
+fileStore.on('change', () => mockConfigCache.load());
 
 // --- Management API (port 3001) ---
 const managementApp = express();

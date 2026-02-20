@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { EventEmitter } from 'events';
 import { config } from '../config';
 import {
   Workspace,
@@ -12,7 +13,7 @@ export type StoredApi = Api;
 
 // ---- FileStore ----
 
-export class FileStore {
+export class FileStore extends EventEmitter {
   private workspacesCache: Workspace[] | null = null;
   private projectsCache: Map<string, Project[]> = new Map();
   private servicesCache: Map<string, Service[]> = new Map();
@@ -113,6 +114,7 @@ export class FileStore {
     for (const k of [...this.apisCache.keys()]) {
       if (k.startsWith(`${name}/`)) this.apisCache.delete(k);
     }
+    this.emit('change');
     return true;
   }
 
@@ -164,6 +166,7 @@ export class FileStore {
     for (const k of [...this.apisCache.keys()]) {
       if (k.startsWith(`${svcKey}/`)) this.apisCache.delete(k);
     }
+    this.emit('change');
     return true;
   }
 
@@ -208,6 +211,7 @@ export class FileStore {
       services.push(service);
     }
     this.servicesCache.set(key, services);
+    this.emit('change');
   }
 
   deleteService(ws: string, proj: string, name: string): boolean {
@@ -218,6 +222,7 @@ export class FileStore {
     const services = this.getServices(ws, proj).filter(s => s.name !== name);
     this.servicesCache.set(key, services);
     this.apisCache.delete(`${key}/${name}`);
+    this.emit('change');
     return true;
   }
 
@@ -248,6 +253,7 @@ export class FileStore {
     }
     this.apisCache.set(key, apis);
     fs.writeFileSync(this.apisFile(ws, proj, svc), JSON.stringify(apis, null, 2));
+    this.emit('change');
   }
 
   deleteApi(ws: string, proj: string, svc: string, name: string): boolean {
@@ -258,6 +264,7 @@ export class FileStore {
     apis.splice(idx, 1);
     this.apisCache.set(key, apis);
     fs.writeFileSync(this.apisFile(ws, proj, svc), JSON.stringify(apis, null, 2));
+    this.emit('change');
     return true;
   }
 }

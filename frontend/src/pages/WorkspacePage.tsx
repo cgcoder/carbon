@@ -6,6 +6,7 @@ import {
 import { Project } from '@carbon/shared';
 import { useWorkspace } from '../context/WorkspaceContext';
 import CreateProjectModal from '../components/CreateProjectModal';
+import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
 import * as api from '../api/client';
 
 export default function WorkspacePage() {
@@ -14,6 +15,7 @@ export default function WorkspacePage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError('');
@@ -26,11 +28,16 @@ export default function WorkspacePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleDelete = async (name: string, e: React.MouseEvent) => {
+  const handleDelete = (name: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    setPendingDelete(name);
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
     try {
-      await api.deleteProject(activeWorkspace, name);
-      setProjects(ps => ps.filter(p => p.name !== name));
+      await api.deleteProject(activeWorkspace, pendingDelete);
+      setProjects(ps => ps.filter(p => p.name !== pendingDelete));
     } catch (err: any) {
       setError(err.message);
     }
@@ -79,6 +86,13 @@ export default function WorkspacePage() {
       <CreateProjectModal
         opened={createOpen}
         onClose={() => { setCreateOpen(false); load(); }}
+      />
+
+      <ConfirmDeleteModal
+        opened={!!pendingDelete}
+        entityName={pendingDelete ?? ''}
+        onConfirm={confirmDelete}
+        onClose={() => setPendingDelete(null)}
       />
     </Stack>
   );

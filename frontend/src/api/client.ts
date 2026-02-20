@@ -53,6 +53,16 @@ export const createService = (ws: string, proj: string, data: Service) =>
     `/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(proj)}/services`,
     { method: 'POST', body: JSON.stringify(data) }
   );
+export const updateService = (ws: string, proj: string, name: string, data: Omit<Service, 'name'>) =>
+  request<Service>(
+    `/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(proj)}/services/${encodeURIComponent(name)}`,
+    { method: 'PUT', body: JSON.stringify(data) }
+  );
+export const deleteService = (ws: string, proj: string, name: string) =>
+  request<void>(
+    `/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(proj)}/services/${encodeURIComponent(name)}`,
+    { method: 'DELETE' }
+  );
 
 // APIs
 export const getApis = (ws: string, proj: string, svc: string) =>
@@ -63,6 +73,11 @@ export const createApi = (ws: string, proj: string, svc: string, data: Omit<Api,
   request<Api>(
     `/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(proj)}/services/${encodeURIComponent(svc)}/apis`,
     { method: 'POST', body: JSON.stringify(data) }
+  );
+export const updateApi = (ws: string, proj: string, svc: string, name: string, data: Omit<Api, 'name'>) =>
+  request<Api>(
+    `/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(proj)}/services/${encodeURIComponent(svc)}/apis/${encodeURIComponent(name)}`,
+    { method: 'PUT', body: JSON.stringify(data) }
   );
 export const deleteApi = (ws: string, proj: string, svc: string, name: string) =>
   request<void>(
