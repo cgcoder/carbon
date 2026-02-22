@@ -27,11 +27,23 @@ export interface TemplateResponseProviderConfig extends BaseResponseProviderConf
   template: string;
 }
 
-/** Config for proxying the request to one of the service's named environments. */
+/** Config for proxying the request to a downstream service. */
 export interface ProxyResponseProviderConfig extends BaseResponseProviderConfig {
   type: 'proxy';
-  /** Must match a ServiceEnvironment.name defined on the parent Service. */
-  environment: string;
+  /** Base URL of the downstream service (e.g. "https://api.example.com"). */
+  targetUrl: string;
+  /**
+   * Optional JavaScript snippet to customise the outgoing request before forwarding.
+   * Called with (request: MockRequest, outgoing: OutgoingRequest).
+   * Mutate `outgoing.url`, `outgoing.query`, `outgoing.body`, or `outgoing.headers` as needed.
+   */
+  outgoingRequestBuilderScript?: string;
+  /**
+   * Optional JavaScript snippet to transform the downstream response before returning it.
+   * Called with (request: MockRequest, response: { status: number; headers: Record<string,string>; body: unknown }).
+   * Mutate `response` properties as needed.
+   */
+  responseBuilderScript?: string;
 }
 
 /** A single scenario within a ScenarioResponseProviderConfig. */
@@ -58,6 +70,27 @@ export type ResponseProviderConfig =
   | ProxyResponseProviderConfig
   | ScenarioResponseProviderConfig;
 
+/** A JavaScript function body used to match incoming requests. */
+export interface RequestMatcherFunction {
+  /** JavaScript function body. Receives `request: MockRequest`, returns `boolean`. Empty = catch-all. */
+  body: string;
+}
+
+/**
+ * A conditional response provider.
+ * `matcher.body` is a JavaScript function body (receives `request: MockRequest`, must return boolean).
+ * An empty body is treated as a catch-all (always matches).
+ * Providers are evaluated in order; the first match wins.
+ */
+export interface MockProviderConfig {
+  /** Human-readable label. Must be unique within the parent Api's providers list. */
+  name: string;
+  matcher: RequestMatcherFunction;
+  provider: ResponseProviderConfig;
+  /** When false this provider is skipped during request matching. Defaults to true when absent. */
+  enabled?: boolean;
+}
+
 export interface Api {
   /** Must be unique within the parent Service. */
   name: string;
@@ -65,5 +98,8 @@ export interface Api {
   method: HttpMethod;
   /** Regex matched against the incoming request URL path. */
   urlPattern: string;
-  response: ResponseProviderConfig;
+  /** Ordered list of conditional providers. First matching provider's response is used. */
+  providers: MockProviderConfig[];
+  /** When false this API is skipped by the mock router. Defaults to true when absent. */
+  enabled?: boolean;
 }

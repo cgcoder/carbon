@@ -21,7 +21,7 @@ router.post('/', (req: Request, res: Response) => {
     res.status(404).json({ error: `Project "${proj}" not found` });
     return;
   }
-  const { name, displayName, description, hostname, matchHostName, environments, injectLatencyMs, urlPrefix } = req.body;
+  const { name, displayName, description, hostname, matchHostName, injectLatencyMs, urlPrefix } = req.body;
   if (!name || typeof name !== 'string' || name.includes('/') || name.includes('\\')) {
     res.status(400).json({ error: 'name is required and must not contain / or \\' });
     return;
@@ -36,7 +36,6 @@ router.post('/', (req: Request, res: Response) => {
     description: description || '',
     ...(hostname !== undefined && { hostname }),
     ...(matchHostName !== undefined && { matchHostName }),
-    ...(environments !== undefined && { environments }),
     ...(injectLatencyMs !== undefined && { injectLatencyMs }),
     ...(urlPrefix !== undefined && { urlPrefix }),
   };
@@ -55,8 +54,8 @@ router.get('/:service', (req: Request, res: Response) => {
   res.json(service);
 });
 
-// PUT /:service - update displayName, description, environments
-router.put('/:service', (req: Request, res: Response) => {
+// PATCH /:service - partially update service fields (name is immutable)
+router.patch('/:service', (req: Request, res: Response) => {
   if ('name' in req.body) {
     res.status(400).json({ error: 'name cannot be changed' });
     return;
@@ -67,14 +66,14 @@ router.put('/:service', (req: Request, res: Response) => {
     res.status(404).json({ error: `Service "${svcName}" not found` });
     return;
   }
-  const { displayName, description, hostname, matchHostName, environments, injectLatencyMs, urlPrefix } = req.body;
+  const { displayName, description, hostname, matchHostName, injectLatencyMs, urlPrefix, enabled } = req.body;
   if (displayName !== undefined) service.displayName = displayName;
   if (description !== undefined) service.description = description;
   if (hostname !== undefined) service.hostname = hostname;
   if (matchHostName !== undefined) service.matchHostName = matchHostName;
-  if (environments !== undefined) service.environments = environments;
   if (injectLatencyMs !== undefined) service.injectLatencyMs = injectLatencyMs;
   if (urlPrefix !== undefined) service.urlPrefix = urlPrefix;
+  if (enabled !== undefined) service.enabled = enabled;
   fileStore.saveService(ws, proj, service);
   res.json(service);
 });

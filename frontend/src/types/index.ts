@@ -2,7 +2,6 @@
 export type {
   Workspace,
   Service,
-  ServiceEnvironment,
   Api,
   HttpMethod,
   MockRequest,
@@ -14,6 +13,7 @@ export type {
   ScenarioResponseProviderConfig,
   Scenario,
   ResponseProviderConfig,
+  MockProviderConfig,
 } from '@carbon/shared';
 export { GLOBAL_VARS } from '@carbon/shared';
 

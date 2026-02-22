@@ -3,9 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Stack, Group, Title, Text, Button, ActionIcon, Alert,
-  Anchor, Breadcrumbs, Table, Badge, Menu,
+  Anchor, Breadcrumbs, Table, Badge, Switch,
 } from '@mantine/core';
-import { Api, ResponseProviderConfig } from '@carbon/shared';
+import { Api } from '@carbon/shared';
 import { useWorkspace } from '../context/WorkspaceContext';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
 import * as api from '../api/client';
@@ -15,7 +15,7 @@ const METHOD_COLORS: Record<string, string> = {
   DELETE: 'red', HEAD: 'gray', OPTIONS: 'violet',
 };
 
-const PROVIDER_LABELS: Record<ResponseProviderConfig['type'], string> = {
+const PROVIDER_LABELS: Record<string, string> = {
   static: 'Static',
   script: 'Script',
   template: 'Template',
@@ -43,11 +43,32 @@ export default function ServicePage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: apisKey }),
   });
 
-  const newApiPath = (type: ResponseProviderConfig['type']) =>
-    `/projects/${encodeURIComponent(projectName!)}/services/${encodeURIComponent(serviceName!)}/apis/new?type=${type}`;
+  const toggleMutation = useMutation({
+    mutationFn: (a: Api) =>
+      api.updateApi(activeWorkspace, projectName!, serviceName!, a.name, { ...a, enabled: a.enabled === false ? true : false }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: apisKey }),
+  });
+
+  const newApiPath = () =>
+    `/projects/${encodeURIComponent(projectName!)}/services/${encodeURIComponent(serviceName!)}/apis/new`;
 
   const editApiPath = (a: Api) =>
     `/projects/${encodeURIComponent(projectName!)}/services/${encodeURIComponent(serviceName!)}/apis/${encodeURIComponent(a.name)}/edit`;
+
+  function renderProviders(a: Api) {
+    if (a.providers.length === 0) return <Text size="sm" c="dimmed">—</Text>;
+    const types = [...new Set(a.providers.map(p => p.provider.type))];
+    return (
+      <Group gap={4} wrap="wrap">
+        {types.map(t => (
+          <Badge key={t} variant="light" size="sm">{PROVIDER_LABELS[t] ?? t}</Badge>
+        ))}
+        {a.providers.length > 1 && (
+          <Text size="xs" c="dimmed">({a.providers.length})</Text>
+        )}
+      </Group>
+    );
+  }
 
   return (
     <Stack>
@@ -61,19 +82,7 @@ export default function ServicePage() {
 
       <Group justify="space-between">
         <Title order={2}>{serviceName}</Title>
-        <Menu position="bottom-end">
-          <Menu.Target>
-            <Button>New API ▾</Button>
-          </Menu.Target>
-          <Menu.Dropdown>
-            <Menu.Label>Response Provider</Menu.Label>
-            <Menu.Item onClick={() => navigate(newApiPath('static'))}>Static</Menu.Item>
-            <Menu.Item onClick={() => navigate(newApiPath('script'))}>Script</Menu.Item>
-            <Menu.Item onClick={() => navigate(newApiPath('template'))}>Template</Menu.Item>
-            <Menu.Item onClick={() => navigate(newApiPath('proxy'))}>Proxy</Menu.Item>
-            <Menu.Item onClick={() => navigate(newApiPath('scenario'))}>Scenario</Menu.Item>
-          </Menu.Dropdown>
-        </Menu>
+        <Button onClick={() => navigate(newApiPath())}>New API</Button>
       </Group>
 
       {(error || deleteMutation.error) && (
@@ -88,17 +97,26 @@ export default function ServicePage() {
         <Table striped highlightOnHover withTableBorder>
           <Table.Thead>
             <Table.Tr>
+              <Table.Th>Enabled</Table.Th>
               <Table.Th>Method</Table.Th>
               <Table.Th>Name</Table.Th>
               <Table.Th>URL Pattern</Table.Th>
-              <Table.Th>Provider</Table.Th>
+              <Table.Th>Providers</Table.Th>
               <Table.Th>Description</Table.Th>
               <Table.Th />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
             {apis.map(a => (
-              <Table.Tr key={a.name}>
+              <Table.Tr key={a.name} style={{ opacity: a.enabled === false ? 0.5 : 1 }}>
+                <Table.Td>
+                  <Switch
+                    checked={a.enabled !== false}
+                    size="xs"
+                    onChange={() => toggleMutation.mutate(a)}
+                    title="Enable/disable API"
+                  />
+                </Table.Td>
                 <Table.Td>
                   <Badge color={METHOD_COLORS[a.method] ?? 'gray'} variant="filled" size="sm">
                     {a.method}
@@ -111,7 +129,7 @@ export default function ServicePage() {
                   <Text size="sm" ff="monospace" c="dimmed">{a.urlPattern}</Text>
                 </Table.Td>
                 <Table.Td>
-                  <Badge variant="light" size="sm">{PROVIDER_LABELS[a.response.type]}</Badge>
+                  {renderProviders(a)}
                 </Table.Td>
                 <Table.Td>
                   <Text size="sm" c="dimmed">{a.description || '—'}</Text>

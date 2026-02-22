@@ -1,10 +1,3 @@
-/** A named host URL associated with a specific environment (e.g. staging, production). */
-export interface ServiceEnvironment {
-  name: string;
-  host: string;
-  useProxyAuth?: boolean;
-}
-
 export interface Service {
   /** Immutable identifier used as the directory name. Cannot be changed after creation. */
   name: string;
@@ -15,9 +8,9 @@ export interface Service {
   hostname?: string;
   /** When true, incoming requests must carry a Host header matching `hostname` to be routed to this service. */
   matchHostName?: boolean;
-  /** Optional per-environment proxy targets for this service. */
-  environments?: ServiceEnvironment[];
   injectLatencyMs?: number;
   /** Optional URL prefix. If set, incoming requests must start with this prefix for this service to be considered. API urlPattern is then matched against the path with the prefix stripped. */
   urlPrefix?: string;
+  /** When false the service is completely ignored by the mock router. Defaults to true when absent. */
+  enabled?: boolean;
 }

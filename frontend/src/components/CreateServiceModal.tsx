@@ -3,9 +3,9 @@ import {
     Button, Group, Alert, Divider,
     Checkbox,
 } from '@mantine/core';
-import { HttpMethod, Service } from '@carbon/shared';
+import { Service } from '@carbon/shared';
 import { useWorkspace } from '../context/WorkspaceContext';
-import { useFieldArray, useForm } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '../api/client';
 
@@ -16,12 +16,6 @@ interface Props {
     service?: Service;
 }
 
-const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
-
-const METHOD_COLORS: Record<string, string> = {
-    GET: 'green', POST: 'blue', PUT: 'orange', PATCH: 'yellow',
-    DELETE: 'red', HEAD: 'gray', OPTIONS: 'violet',
-};
 
 const DEFAULT_SERVICE: Service = {
     name: '',
@@ -29,9 +23,9 @@ const DEFAULT_SERVICE: Service = {
     description: '',
     hostname: '',
     matchHostName: false,
-    environments: [],
     injectLatencyMs: 0,
     urlPrefix: '',
+    enabled: true,
 };
 
 export default function CreateServiceModal({ opened, onClose, service }: Props) {
@@ -39,10 +33,9 @@ export default function CreateServiceModal({ opened, onClose, service }: Props) 
     const queryClient = useQueryClient();
     const isEdit = !!service;
 
-    const { register, handleSubmit, formState: { errors }, control } = useForm<Service>({
+    const { register, handleSubmit, formState: { errors } } = useForm<Service>({
         defaultValues: service ?? DEFAULT_SERVICE,
     });
-    const { fields, append, remove } = useFieldArray({ control, name: 'environments' });
 
     const servicesKey = ['services', activeWorkspace, currentProject];
 
@@ -54,7 +47,7 @@ export default function CreateServiceModal({ opened, onClose, service }: Props) 
         },
     });
 
-    const updateMutation = useMutation<Service, Error, Omit<Service, 'name'>>({
+    const updateMutation = useMutation<Service, Error, Partial<Omit<Service, 'name'>>>({
         mutationFn: (data) => api.updateService(activeWorkspace, currentProject!, service!.name, data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: servicesKey });
@@ -113,29 +106,6 @@ export default function CreateServiceModal({ opened, onClose, service }: Props) 
                             {...register("urlPrefix")}
                             placeholder="URL prefix (e.g. /api/v1)"
                         />
-                    </Group>
-                    <Divider my="md" />
-                    {fields.map((field, index) => (
-                        <Group key={field.id} grow>
-                            <TextInput
-                                {...register(`environments.${index}.name` as const, { required: "Environment name is required" })}
-                                placeholder="Environment (e.g. staging, production)"
-                                required
-                            />
-                            <TextInput
-                                {...register(`environments.${index}.host` as const, { required: "Host is required" })}
-                                placeholder="Host URL for this environment"
-                                required
-                            />
-                            <Checkbox
-                                {...register(`environments.${index}.useProxyAuth` as const)}
-                                label="Use Proxy Auth"
-                            />
-                            <Button variant="outline" color="red" onClick={() => remove(index)}>Remove</Button>
-                        </Group>
-                    ))}
-                    <Group grow>
-                        <Button fullWidth={false} variant="outline" onClick={() => append({ name: '', host: '', useProxyAuth: false })}>Add Environment</Button>
                     </Group>
                     <Divider my="md" />
                     <Group justify="flex-end">

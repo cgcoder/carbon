@@ -21,13 +21,22 @@ router.post('/', (req: Request, res: Response) => {
     res.status(404).json({ error: `Service "${svc}" not found` });
     return;
   }
-  const { name, description, method, urlPattern, response } = req.body;
+  const { name, description, method, urlPattern, providers } = req.body;
   if (!name || typeof name !== 'string') {
     res.status(400).json({ error: 'name is required' });
     return;
   }
-  if (!method || !urlPattern || !response) {
-    res.status(400).json({ error: 'method, urlPattern, and response are required' });
+  if (!method || !urlPattern || !providers) {
+    res.status(400).json({ error: 'method, urlPattern, and providers are required' });
+    return;
+  }
+  if (!Array.isArray(providers) || providers.some((p: { name?: unknown }) => !p.name || typeof p.name !== 'string')) {
+    res.status(400).json({ error: 'each provider must have a non-empty name' });
+    return;
+  }
+  const providerNames: string[] = providers.map((p: { name: string }) => p.name);
+  if (new Set(providerNames).size !== providerNames.length) {
+    res.status(400).json({ error: 'provider names must be unique within an API' });
     return;
   }
   if (fileStore.getApi(ws, proj, svc, name)) {
@@ -39,7 +48,7 @@ router.post('/', (req: Request, res: Response) => {
     description: description || '',
     method: method as HttpMethod,
     urlPattern,
-    response,
+    providers,
   };
   fileStore.saveApi(ws, proj, svc, api);
   res.status(201).json(api);
@@ -56,7 +65,7 @@ router.get('/:apiName', (req: Request, res: Response) => {
   res.json(api);
 });
 
-// PUT /:apiName - update description, method, urlPattern, response
+// PUT /:apiName - update description, method, urlPattern, providers
 router.put('/:apiName', (req: Request, res: Response) => {
   if ('name' in req.body) {
     res.status(400).json({ error: 'name cannot be changed' });
@@ -68,11 +77,22 @@ router.put('/:apiName', (req: Request, res: Response) => {
     res.status(404).json({ error: `Api "${apiName}" not found` });
     return;
   }
-  const { description, method, urlPattern, response } = req.body;
+  const { description, method, urlPattern, providers } = req.body;
+  if (providers !== undefined) {
+    if (!Array.isArray(providers) || providers.some((p: { name?: unknown }) => !p.name || typeof p.name !== 'string')) {
+      res.status(400).json({ error: 'each provider must have a non-empty name' });
+      return;
+    }
+    const providerNames: string[] = providers.map((p: { name: string }) => p.name);
+    if (new Set(providerNames).size !== providerNames.length) {
+      res.status(400).json({ error: 'provider names must be unique within an API' });
+      return;
+    }
+  }
   if (description !== undefined) api.description = description;
   if (method !== undefined) api.method = method as HttpMethod;
   if (urlPattern !== undefined) api.urlPattern = urlPattern;
-  if (response !== undefined) api.response = response;
+  if (providers !== undefined) api.providers = providers;
   fileStore.saveApi(ws, proj, svc, api);
   res.json(api);
 });

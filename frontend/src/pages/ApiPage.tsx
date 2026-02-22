@@ -1,163 +1,229 @@
-import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { Controller, useFieldArray, useForm } from 'react-hook-form';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { Controller, useForm } from 'react-hook-form';
 import {
   Stack, Group, Title, Text, Button, Alert, Breadcrumbs, Anchor,
-  TextInput, Textarea, NumberInput, Select, Divider, Paper, Loader,
+  TextInput, Select, Divider, Paper, Loader,
+  Modal, SimpleGrid, Card, Accordion, Badge, ActionIcon, Switch,
 } from '@mantine/core';
-import {
-  Api, HttpMethod, ResponseProviderConfig, Service,
-  StaticResponseProviderConfig, ScriptResponseProviderConfig,
-  TemplateResponseProviderConfig, ProxyResponseProviderConfig,
-  ScenarioResponseProviderConfig, Scenario,
-} from '@carbon/shared';
+import { useDisclosure } from '@mantine/hooks';
+import { Api, HttpMethod, MockProviderConfig } from '@carbon/shared';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useWorkspace } from '../context/WorkspaceContext';
 import * as apiClient from '../api/client';
+import {
+  ProviderType, PROVIDER_TYPE_OPTIONS,
+} from '../utils/providerForm';
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
-
-type ProviderType = ResponseProviderConfig['type'];
-type ScenarioResponseType = 'static' | 'script' | 'template' | 'proxy';
-
-interface ScenarioItemForm {
-  scenarioTestFnCallbackStr: string;
-  responseType: ScenarioResponseType;
-  statusCode: number;
-  headersRaw: string;
-  body: string;
-  script: string;
-  template: string;
-  environment: string;
-}
 
 interface FormValues {
   name: string;
   description: string;
   method: HttpMethod;
   urlPattern: string;
-  statusCode: number;
-  headers: { key: string; value: string }[];
-  body: string;
-  script: string;
-  template: string;
-  environment: string;
-  scenarios: ScenarioItemForm[];
 }
 
-const DEFAULT_SCENARIO: ScenarioItemForm = {
-  scenarioTestFnCallbackStr: '',
-  responseType: 'static',
-  statusCode: 200,
-  headersRaw: '',
-  body: '',
-  script: '',
-  template: '',
-  environment: '',
+function getDefaultValues(existingApi?: Api): FormValues {
+  if (existingApi) {
+    return {
+      name: existingApi.name,
+      description: existingApi.description,
+      method: existingApi.method,
+      urlPattern: existingApi.urlPattern,
+    };
+  }
+  return {
+    name: '',
+    description: '',
+    method: 'GET',
+    urlPattern: '',
+  };
+}
+
+// ── Read-only accordion shown in edit mode ────────────────────────────────────
+
+const PROVIDER_TYPE_COLORS: Record<string, string> = {
+  static: 'blue',
+  script: 'violet',
+  template: 'teal',
+  proxy: 'orange',
 };
 
-const PROVIDER_LABELS: Record<ProviderType, string> = {
-  static: 'Static',
-  script: 'Script',
-  template: 'Template',
-  proxy: 'Proxy',
-  scenario: 'Scenario',
-};
+function ProviderReadOnlyAccordion({
+  providers,
+  onEdit,
+  onDelete,
+  onAdd,
+  onToggle,
+}: {
+  providers: MockProviderConfig[];
+  onEdit: (name: string) => void;
+  onDelete: (name: string) => void;
+  onAdd: () => void;
+  onToggle: (name: string, enabled: boolean) => void;
+}) {
+  return (
+    <Stack gap="xs">
+      <Accordion variant="separated" radius="sm">
+        {providers.map((p) => {
+          const type = p.provider.type === 'scenario' ? 'static' : p.provider.type;
+          const typeLabel = PROVIDER_TYPE_OPTIONS.find(o => o.type === type)?.label ?? type;
+          const prov = p.provider as any;
+          const isEnabled = p.enabled !== false;
 
-function parseHeaders(raw: string): Record<string, string> {
-  return Object.fromEntries(
-    raw.split('\n')
-      .map(line => {
-        const idx = line.indexOf(':');
-        return idx > 0 ? [line.slice(0, idx).trim(), line.slice(idx + 1).trim()] : null;
-      })
-      .filter((parts): parts is [string, string] => parts !== null && parts[0].length > 0)
+          return (
+            <Accordion.Item key={p.name} value={p.name} style={!isEnabled ? { opacity: 0.5 } : undefined}>
+              <Accordion.Control>
+                <Group gap="sm">
+                  <Badge color={PROVIDER_TYPE_COLORS[type] ?? 'gray'} variant="light" size="sm">
+                    {typeLabel}
+                  </Badge>
+                  {!isEnabled && (
+                    <Badge color="gray" variant="outline" size="sm">disabled</Badge>
+                  )}
+                  <Text fw={500} size="sm">{p.name}</Text>
+                  {p.matcher.body && (
+                    <Text size="xs" c="dimmed" ff="monospace" style={{ flex: 1 }} lineClamp={1}>
+                      {p.matcher.body}
+                    </Text>
+                  )}
+                </Group>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="xs">
+                  <Group justify="space-between" gap="xs">
+                    <Switch
+                      label="Enabled"
+                      size="sm"
+                      checked={isEnabled}
+                      onChange={(e) => onToggle(p.name, e.currentTarget.checked)}
+                    />
+                    <Group gap="xs">
+                      <Button size="xs" variant="light" onClick={() => onEdit(p.name)}>
+                        Edit
+                      </Button>
+                      <ActionIcon
+                        size="sm"
+                        color="red"
+                        variant="subtle"
+                        onClick={() => onDelete(p.name)}
+                        title="Remove provider"
+                      >
+                        ×
+                      </ActionIcon>
+                    </Group>
+                  </Group>
+
+                  {p.matcher.body && (
+                    <Stack gap={2}>
+                      <Text size="xs" fw={600} c="dimmed">Matcher</Text>
+                      <Paper withBorder p="xs" radius="sm" bg="gray.0">
+                        <Text size="xs" ff="monospace" style={{ whiteSpace: 'pre-wrap' }}>
+                          {p.matcher.body}
+                        </Text>
+                      </Paper>
+                    </Stack>
+                  )}
+
+                  <Group gap="xl">
+                    {prov.statusCode != null && (
+                      <Stack gap={2}>
+                        <Text size="xs" fw={600} c="dimmed">Status</Text>
+                        <Text size="sm">{prov.statusCode}</Text>
+                      </Stack>
+                    )}
+                    {prov.injectLatencyMs != null && prov.injectLatencyMs > 0 && (
+                      <Stack gap={2}>
+                        <Text size="xs" fw={600} c="dimmed">Latency</Text>
+                        <Text size="sm">{prov.injectLatencyMs} ms</Text>
+                      </Stack>
+                    )}
+                  </Group>
+
+                  {prov.headers && Object.keys(prov.headers).length > 0 && (
+                    <Stack gap={2}>
+                      <Text size="xs" fw={600} c="dimmed">Headers</Text>
+                      <Paper withBorder p="xs" radius="sm" bg="gray.0">
+                        {Object.entries(prov.headers as Record<string, string>).map(([k, v]) => (
+                          <Text key={k} size="xs" ff="monospace">{k}: {v}</Text>
+                        ))}
+                      </Paper>
+                    </Stack>
+                  )}
+
+                  {type === 'static' && prov.body && (
+                    <Stack gap={2}>
+                      <Text size="xs" fw={600} c="dimmed">Body</Text>
+                      <Paper withBorder p="xs" radius="sm" bg="gray.0">
+                        <Text size="xs" ff="monospace" style={{ whiteSpace: 'pre-wrap' }} lineClamp={6}>
+                          {prov.body}
+                        </Text>
+                      </Paper>
+                    </Stack>
+                  )}
+
+                  {type === 'script' && prov.script && (
+                    <Stack gap={2}>
+                      <Text size="xs" fw={600} c="dimmed">Script</Text>
+                      <Paper withBorder p="xs" radius="sm" bg="gray.0">
+                        <Text size="xs" ff="monospace" style={{ whiteSpace: 'pre-wrap' }} lineClamp={6}>
+                          {prov.script}
+                        </Text>
+                      </Paper>
+                    </Stack>
+                  )}
+
+                  {type === 'template' && prov.template && (
+                    <Stack gap={2}>
+                      <Text size="xs" fw={600} c="dimmed">Template</Text>
+                      <Paper withBorder p="xs" radius="sm" bg="gray.0">
+                        <Text size="xs" ff="monospace" style={{ whiteSpace: 'pre-wrap' }} lineClamp={6}>
+                          {prov.template}
+                        </Text>
+                      </Paper>
+                    </Stack>
+                  )}
+
+                  {type === 'proxy' && prov.targetUrl && (
+                    <Stack gap={2}>
+                      <Text size="xs" fw={600} c="dimmed">Target URL</Text>
+                      <Text size="sm" ff="monospace">{prov.targetUrl}</Text>
+                    </Stack>
+                  )}
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+          );
+        })}
+      </Accordion>
+
+      <Button size="xs" variant="subtle" onClick={onAdd} style={{ alignSelf: 'flex-start' }}>
+        + Add Provider
+      </Button>
+    </Stack>
   );
 }
 
-function headersToRaw(headers: Record<string, string>): string {
-  return Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\n');
-}
-
-function scenarioToForm(scenario: Scenario): ScenarioItemForm {
-  const resp = scenario.response;
-  return {
-    scenarioTestFnCallbackStr: scenario.scenarioTestFnCallbackStr,
-    responseType: resp.type as ScenarioResponseType,
-    statusCode: resp.statusCode,
-    headersRaw: headersToRaw(resp.headers),
-    body: resp.type === 'static' ? (resp as StaticResponseProviderConfig).body : '',
-    script: resp.type === 'script' ? (resp as ScriptResponseProviderConfig).script : '',
-    template: resp.type === 'template' ? (resp as TemplateResponseProviderConfig).template : '',
-    environment: resp.type === 'proxy' ? (resp as ProxyResponseProviderConfig).environment : '',
-  };
-}
-
-function formToScenario(item: ScenarioItemForm): Scenario {
-  const headers = parseHeaders(item.headersRaw);
-  const base = { statusCode: Number(item.statusCode), headers };
-  let response: Scenario['response'];
-  switch (item.responseType) {
-    case 'static': response = { type: 'static', ...base, body: item.body }; break;
-    case 'script': response = { type: 'script', ...base, script: item.script }; break;
-    case 'template': response = { type: 'template', ...base, template: item.template }; break;
-    case 'proxy': response = { type: 'proxy', ...base, environment: item.environment }; break;
-  }
-  return { scenarioTestFnCallbackStr: item.scenarioTestFnCallbackStr, response };
-}
-
-function getDefaultValues(type: ProviderType, existingApi?: Api): FormValues {
-  const staticResp = existingApi?.response.type === 'static' ? existingApi.response as StaticResponseProviderConfig : undefined;
-  const scriptResp = existingApi?.response.type === 'script' ? existingApi.response as ScriptResponseProviderConfig : undefined;
-  const templateResp = existingApi?.response.type === 'template' ? existingApi.response as TemplateResponseProviderConfig : undefined;
-  const proxyResp = existingApi?.response.type === 'proxy' ? existingApi.response as ProxyResponseProviderConfig : undefined;
-  const scenarioResp = existingApi?.response.type === 'scenario' ? existingApi.response as ScenarioResponseProviderConfig : undefined;
-  const activeResp = staticResp ?? scriptResp ?? templateResp ?? proxyResp;
-  return {
-    name: existingApi?.name ?? '',
-    description: existingApi?.description ?? '',
-    method: existingApi?.method ?? 'GET',
-    urlPattern: existingApi?.urlPattern ?? '',
-    statusCode: activeResp?.statusCode ?? 200,
-    headers: activeResp
-      ? Object.entries(activeResp.headers).map(([key, value]) => ({ key, value }))
-      : [],
-    body: staticResp?.body ?? '',
-    script: scriptResp?.script ?? '',
-    template: templateResp?.template ?? '',
-    environment: proxyResp?.environment ?? '',
-    scenarios: scenarioResp ? scenarioResp.scenarios.map(scenarioToForm) : [{ ...DEFAULT_SCENARIO }],
-  };
-}
+// ── Main form ────────────────────────────────────────────────────────────────
 
 interface ApiFormProps {
-  type: ProviderType;
   projectName: string;
   serviceName: string;
   servicePath: string;
   existingApi?: Api;
 }
 
-function ApiForm({ type, projectName, serviceName, servicePath, existingApi }: ApiFormProps) {
+function ApiForm({ projectName, serviceName, servicePath, existingApi }: ApiFormProps) {
   const navigate = useNavigate();
   const { activeWorkspace } = useWorkspace();
   const queryClient = useQueryClient();
   const isEdit = !!existingApi;
 
-  const { data: services = [] } = useQuery<Service[]>({
-    queryKey: ['services', activeWorkspace, projectName],
-    queryFn: () => apiClient.getServices(activeWorkspace, projectName),
-    enabled: type === 'proxy',
+  const [typeModalOpened, { open: openTypeModal, close: closeTypeModal }] = useDisclosure(false);
+
+  const { register, handleSubmit, control, formState: { errors } } = useForm<FormValues>({
+    defaultValues: getDefaultValues(existingApi),
   });
-
-  const service = services.find(s => s.name === serviceName);
-  const environmentOptions = (service?.environments ?? []).map(e => ({ value: e.name, label: e.name }));
-
-  const { register, handleSubmit, control, watch, formState: { errors } } = useForm<FormValues>({
-    defaultValues: getDefaultValues(type, existingApi),
-  });
-
-  const { fields: headerFields, append: appendHeader, remove: removeHeader } = useFieldArray({ control, name: 'headers' });
-  const { fields: scenarioFields, append: appendScenario, remove: removeScenario } = useFieldArray({ control, name: 'scenarios' });
 
   const apisKey = ['apis', activeWorkspace, projectName, serviceName];
 
@@ -171,323 +237,166 @@ function ApiForm({ type, projectName, serviceName, servicePath, existingApi }: A
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: apisKey }); navigate(servicePath); },
   });
 
+  const patchProviderMutation = useMutation<Api, Error, Omit<Api, 'name'>>({
+    mutationFn: (data) => apiClient.updateApi(activeWorkspace, projectName, serviceName, existingApi!.name, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: apisKey }); },
+  });
+
   const mutation = isEdit ? updateMutation : createMutation;
 
   const onSubmit = (values: FormValues) => {
-    const { name, description, method, urlPattern, statusCode, headers, body, script, template, environment, scenarios } = values;
-    const headersObj = Object.fromEntries(
-      headers.filter(h => h.key.trim()).map(h => [h.key.trim(), h.value])
-    );
-    let response: ResponseProviderConfig;
-    switch (type) {
-      case 'static':
-        response = { type: 'static', statusCode: Number(statusCode), headers: headersObj, body };
-        break;
-      case 'script':
-        response = { type: 'script', statusCode: Number(statusCode), headers: headersObj, script };
-        break;
-      case 'template':
-        response = { type: 'template', statusCode: Number(statusCode), headers: headersObj, template };
-        break;
-      case 'proxy':
-        response = { type: 'proxy', statusCode: Number(statusCode), headers: headersObj, environment };
-        break;
-      case 'scenario':
-        response = { type: 'scenario', scenarios: scenarios.map(formToScenario) };
-        break;
-    }
-    const payload = { description, method, urlPattern, response };
+    const { name, description, method, urlPattern } = values;
     if (isEdit) {
-      updateMutation.mutate(payload);
+      // In edit mode, providers are managed per-provider via ProviderEditPage.
+      // We send the providers from the original existingApi unchanged.
+      updateMutation.mutate({
+        description,
+        method,
+        urlPattern,
+        providers: existingApi!.providers,
+      });
     } else {
-      createMutation.mutate({ name, ...payload });
+      createMutation.mutate({ name, description, method, urlPattern, providers: [] });
     }
   };
 
+  // Edit mode: navigate to ProviderEditPage
+  const providerEditPath = (name: string) =>
+    `/projects/${encodeURIComponent(projectName)}/services/${encodeURIComponent(serviceName)}/apis/${encodeURIComponent(existingApi!.name)}/providers/${encodeURIComponent(name)}/edit`;
+
+  const handleEditProvider = (name: string) => {
+    navigate(providerEditPath(name), { state: { api: existingApi } });
+  };
+
+  const handleDeleteProvider = (name: string) => {
+    const updatedProviders = existingApi!.providers.filter(p => p.name !== name);
+    updateMutation.mutate({
+      description: existingApi!.description,
+      method: existingApi!.method,
+      urlPattern: existingApi!.urlPattern,
+      providers: updatedProviders,
+    });
+  };
+
+  const handleToggleProvider = (name: string, enabled: boolean) => {
+    const updatedProviders = existingApi!.providers.map(p =>
+      p.name === name ? { ...p, enabled } : p
+    );
+    patchProviderMutation.mutate({
+      description: existingApi!.description,
+      method: existingApi!.method,
+      urlPattern: existingApi!.urlPattern,
+      providers: updatedProviders,
+    });
+  };
+
+  const handleAddProviderEdit = (type: ProviderType) => {
+    const newPath = `/projects/${encodeURIComponent(projectName)}/services/${encodeURIComponent(serviceName)}/apis/${encodeURIComponent(existingApi!.name)}/providers/new/edit`;
+    navigate(newPath, { state: { api: existingApi, providerType: type } });
+    closeTypeModal();
+  };
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)}>
-      <Stack>
-        {mutation.error && <Alert color="red" title="Error">{mutation.error.message}</Alert>}
+    <>
+      <form onSubmit={handleSubmit(onSubmit)}>
+        <Stack>
+          {mutation.error && <Alert color="red" title="Error">{mutation.error.message}</Alert>}
 
-        <Group grow>
-          <TextInput
-            label="API Name"
-            {...register('name', { required: 'Name is required' })}
-            placeholder="get-user"
-            required
-            disabled={isEdit}
-            error={errors.name?.message}
-          />
-          <Controller
-            name="method"
-            control={control}
-            render={({ field }) => (
-              <Select
-                label="Method"
-                data={METHODS.map(m => ({ value: m, label: m }))}
-                allowDeselect={false}
-                value={field.value}
-                onChange={v => field.onChange(v ?? 'GET')}
-              />
-            )}
-          />
-        </Group>
-
-        <TextInput
-          label="URL Pattern"
-          {...register('urlPattern', { required: 'URL Pattern is required' })}
-          placeholder="^/users/\d+$"
-          description="Matched as a regular expression against the request path."
-          required
-          error={errors.urlPattern?.message}
-        />
-
-        <TextInput
-          label="Description"
-          {...register('description')}
-          placeholder="Optional description"
-        />
-
-        <Divider label={`${PROVIDER_LABELS[type]} Response`} labelPosition="left" />
-
-        {type !== 'scenario' && (
-          <>
+          <Group grow>
+            <TextInput
+              label="API Name"
+              {...register('name', { required: 'Name is required' })}
+              placeholder="get-user"
+              required
+              disabled={isEdit}
+              error={errors.name?.message}
+            />
             <Controller
-              name="statusCode"
+              name="method"
               control={control}
               render={({ field }) => (
-                <NumberInput
-                  label={type === 'proxy' ? 'Override Status Code' : 'Status Code'}
-                  min={100}
-                  max={599}
+                <Select
+                  label="Method"
+                  data={METHODS.map(m => ({ value: m, label: m }))}
+                  allowDeselect={false}
                   value={field.value}
-                  onChange={v => field.onChange(Number(v))}
-                  description={type === 'proxy' ? 'Status code to return if the proxy response should be overridden.' : undefined}
+                  onChange={v => field.onChange(v ?? 'GET')}
                 />
               )}
             />
+          </Group>
 
-            <Stack gap="xs">
-              <Group justify="space-between">
-                <Text size="sm" fw={500}>{type === 'proxy' ? 'Override Response Headers' : 'Response Headers'}</Text>
-                <Button size="xs" variant="light" onClick={() => appendHeader({ key: '', value: '' })}>+ Add Header</Button>
-              </Group>
-              {headerFields.map((field, i) => (
-                <Group key={field.id} gap="xs">
-                  <TextInput
-                    {...register(`headers.${i}.key`)}
-                    placeholder="Header name"
-                    style={{ flex: 1 }}
-                  />
-                  <TextInput
-                    {...register(`headers.${i}.value`)}
-                    placeholder="Value"
-                    style={{ flex: 2 }}
-                  />
-                  <Button size="xs" color="red" variant="subtle" px="xs" onClick={() => removeHeader(i)}>×</Button>
-                </Group>
-              ))}
-            </Stack>
-          </>
-        )}
-
-        {type === 'static' && (
-          <Textarea
-            label="Body"
-            {...register('body')}
-            rows={12}
-            styles={{ input: { fontFamily: 'monospace' } }}
-            placeholder='{"message": "ok"}'
+          <TextInput
+            label="URL Pattern"
+            {...register('urlPattern', { required: 'URL Pattern is required' })}
+            placeholder="^/users/\d+$"
+            description="Matched as a regular expression against the request path."
+            required
+            error={errors.urlPattern?.message}
           />
-        )}
 
-        {type === 'script' && (
-          <Textarea
-            label="Script"
-            {...register('script', { required: 'Script is required' })}
-            rows={12}
-            styles={{ input: { fontFamily: 'monospace' } }}
-            placeholder={"// Return a JSON-serialisable value\nreturn { message: 'ok', timestamp: Date.now() };"}
-            description="JavaScript code executed to generate the response body."
-            error={errors.script?.message}
+          <TextInput
+            label="Description"
+            {...register('description')}
+            placeholder="Optional description"
           />
-        )}
 
-        {type === 'template' && (
-          <Textarea
-            label="Template"
-            {...register('template', { required: 'Template is required' })}
-            rows={12}
-            styles={{ input: { fontFamily: 'monospace' } }}
-            placeholder='{"id": "{{id}}", "name": "{{name}}"}'
-            description="Mustache template rendered against the incoming request context."
-            error={errors.template?.message}
-          />
-        )}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => navigate(servicePath)}>Cancel</Button>
+            <Button type="submit" loading={mutation.isPending}>{isEdit ? 'Save' : 'Create'}</Button>
+          </Group>
 
-        {type === 'proxy' && (
-          <Controller
-            name="environment"
-            control={control}
-            rules={{ required: 'Environment is required' }}
-            render={({ field }) => (
-              environmentOptions.length > 0
-                ? <Select
-                    label="Environment"
-                    data={environmentOptions}
-                    allowDeselect={false}
-                    value={field.value}
-                    onChange={v => field.onChange(v ?? '')}
-                    description="Target environment to proxy requests to."
-                    error={errors.environment?.message}
-                  />
-                : <TextInput
-                    label="Environment"
-                    value={field.value}
-                    onChange={e => field.onChange(e.target.value)}
-                    placeholder="staging"
-                    description="Must match a ServiceEnvironment name defined on this service."
-                    error={errors.environment?.message}
-                  />
-            )}
-          />
-        )}
+          {isEdit && (
+            <>
+              <Divider label="Response Providers" labelPosition="left" />
 
-        {type === 'scenario' && (
-          <>
-            <Text size="sm" c="dimmed">
-              Scenarios are evaluated in order. The first one whose test function returns true wins.
-            </Text>
+              <Text size="sm" c="dimmed">
+                Providers are evaluated in order. The first one whose matcher returns true is used.
+                Leave the matcher empty to create a catch-all provider.
+              </Text>
 
-            {scenarioFields.map((field, index) => {
-              const responseType = watch(`scenarios.${index}.responseType`);
-              return (
-                <Paper key={field.id} withBorder p="md" radius="sm">
-                  <Stack gap="sm">
-                    <Group justify="space-between">
-                      <Text size="sm" fw={600}>Scenario {index + 1}</Text>
-                      <Button
-                        size="xs"
-                        color="red"
-                        variant="subtle"
-                        onClick={() => removeScenario(index)}
-                        disabled={scenarioFields.length === 1}
-                      >
-                        Remove
-                      </Button>
-                    </Group>
+              <ProviderReadOnlyAccordion
+                providers={existingApi!.providers}
+                onEdit={handleEditProvider}
+                onDelete={handleDeleteProvider}
+                onAdd={openTypeModal}
+                onToggle={handleToggleProvider}
+              />
+            </>
+          )}
+        </Stack>
+      </form>
 
-                    <Textarea
-                      label="Test Function"
-                      {...register(`scenarios.${index}.scenarioTestFnCallbackStr`, { required: 'Test function is required' })}
-                      rows={3}
-                      styles={{ input: { fontFamily: 'monospace' } }}
-                      placeholder="(request) => request.query.env === 'staging'"
-                      description="JavaScript callback that receives the request and returns true if this scenario applies."
-                      error={errors.scenarios?.[index]?.scenarioTestFnCallbackStr?.message}
-                    />
-
-                    <Controller
-                      name={`scenarios.${index}.responseType`}
-                      control={control}
-                      render={({ field: f }) => (
-                        <Select
-                          label="Response Type"
-                          data={[
-                            { value: 'static', label: 'Static' },
-                            { value: 'script', label: 'Script' },
-                            { value: 'template', label: 'Template' },
-                            { value: 'proxy', label: 'Proxy' },
-                          ]}
-                          allowDeselect={false}
-                          value={f.value}
-                          onChange={v => f.onChange(v ?? 'static')}
-                        />
-                      )}
-                    />
-
-                    {responseType !== 'proxy' && (
-                      <Controller
-                        name={`scenarios.${index}.statusCode`}
-                        control={control}
-                        render={({ field: f }) => (
-                          <NumberInput
-                            label="Status Code"
-                            min={100}
-                            max={599}
-                            value={f.value}
-                            onChange={v => f.onChange(Number(v))}
-                          />
-                        )}
-                      />
-                    )}
-
-                    <Textarea
-                      label="Response Headers (Key: Value per line)"
-                      {...register(`scenarios.${index}.headersRaw`)}
-                      rows={2}
-                      styles={{ input: { fontFamily: 'monospace' } }}
-                      placeholder="Content-Type: application/json"
-                    />
-
-                    {responseType === 'static' && (
-                      <Textarea
-                        label="Body"
-                        {...register(`scenarios.${index}.body`)}
-                        rows={4}
-                        styles={{ input: { fontFamily: 'monospace' } }}
-                        placeholder='{"message": "ok"}'
-                      />
-                    )}
-
-                    {responseType === 'script' && (
-                      <Textarea
-                        label="Script"
-                        {...register(`scenarios.${index}.script`)}
-                        rows={4}
-                        styles={{ input: { fontFamily: 'monospace' } }}
-                        placeholder="return { message: 'ok', timestamp: Date.now() };"
-                        description="JavaScript code that returns a JSON-serialisable value."
-                      />
-                    )}
-
-                    {responseType === 'template' && (
-                      <Textarea
-                        label="Template"
-                        {...register(`scenarios.${index}.template`)}
-                        rows={4}
-                        styles={{ input: { fontFamily: 'monospace' } }}
-                        placeholder='{"id": "{{id}}", "name": "{{name}}"}'
-                        description="Mustache template rendered against the request context."
-                      />
-                    )}
-
-                    {responseType === 'proxy' && (
-                      <TextInput
-                        label="Environment"
-                        {...register(`scenarios.${index}.environment`, { required: 'Environment is required' })}
-                        placeholder="staging"
-                        description="Must match a ServiceEnvironment name defined on this service."
-                        error={errors.scenarios?.[index]?.environment?.message}
-                      />
-                    )}
-                  </Stack>
-                </Paper>
-              );
-            })}
-
-            <Button variant="outline" onClick={() => appendScenario({ ...DEFAULT_SCENARIO })}>
-              + Add Scenario
-            </Button>
-          </>
-        )}
-
-        <Group justify="flex-end">
-          <Button variant="default" onClick={() => navigate(servicePath)}>Cancel</Button>
-          <Button type="submit" loading={mutation.isPending}>{isEdit ? 'Save' : 'Create'}</Button>
-        </Group>
-      </Stack>
-    </form>
+      <Modal
+        opened={typeModalOpened}
+        onClose={closeTypeModal}
+        title="Choose Provider Type"
+        centered
+        size="md"
+      >
+        <Stack gap="xs">
+          <Text size="sm" c="dimmed">
+            Select the type of response provider to add.
+          </Text>
+          <SimpleGrid cols={2} spacing="sm">
+            {PROVIDER_TYPE_OPTIONS.map(({ type, label, description }) => (
+              <Card
+                key={type}
+                withBorder
+                p="md"
+                style={{ cursor: 'pointer' }}
+                onClick={() => handleAddProviderEdit(type)}
+              >
+                <Stack gap={4}>
+                  <Text fw={600} size="sm">{label}</Text>
+                  <Text size="xs" c="dimmed">{description}</Text>
+                </Stack>
+              </Card>
+            ))}
+          </SimpleGrid>
+        </Stack>
+      </Modal>
+    </>
   );
 }
 
@@ -497,7 +406,6 @@ export default function ApiPage() {
     serviceName: string;
     apiName?: string;
   }>();
-  const [searchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
   const { activeWorkspace } = useWorkspace();
@@ -515,31 +423,16 @@ export default function ApiPage() {
     ? (apiFromState ?? apis?.find(a => a.name === apiName))
     : undefined;
 
-  const type: ProviderType | undefined = isEdit
-    ? existingApi?.response.type
-    : (searchParams.get('type') as ProviderType | null) ?? undefined;
-
   const servicePath = `/projects/${encodeURIComponent(projectName!)}/services/${encodeURIComponent(serviceName!)}`;
   const projectPath = `/projects/${encodeURIComponent(projectName!)}`;
 
-  const pageTitle = isEdit
-    ? `Edit ${type ? PROVIDER_LABELS[type] : ''} API`
-    : `New ${type ? PROVIDER_LABELS[type] : ''} API`;
+  const pageTitle = isEdit ? 'Edit API' : 'New API';
 
   if (isEdit && isLoading) {
     return (
       <Stack align="center" mt="xl">
         <Loader />
         <Text c="dimmed">Loading API...</Text>
-      </Stack>
-    );
-  }
-
-  if (!type) {
-    return (
-      <Stack>
-        <Alert color="red" title="Error">Invalid or missing API type.</Alert>
-        <Button variant="default" onClick={() => navigate(servicePath)}>Back to Service</Button>
       </Stack>
     );
   }
@@ -556,7 +449,6 @@ export default function ApiPage() {
       <Title order={2}>{pageTitle}</Title>
 
       <ApiForm
-        type={type}
         projectName={projectName!}
         serviceName={serviceName!}
         servicePath={servicePath}

@@ -6,6 +6,7 @@ import WorkspacePage from './pages/WorkspacePage';
 import ProjectPage from './pages/ProjectPage';
 import ServicePage from './pages/ServicePage';
 import ApiPage from './pages/ApiPage';
+import ProviderEditPage from './pages/ProviderEditPage';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const queryClient = new QueryClient();
@@ -25,6 +26,7 @@ export default function App() {
               <Route path="/projects/:projectName/services/:serviceName" element={<ServicePage />} />
               <Route path="/projects/:projectName/services/:serviceName/apis/new" element={<ApiPage />} />
               <Route path="/projects/:projectName/services/:serviceName/apis/:apiName/edit" element={<ApiPage />} />
+              <Route path="/projects/:projectName/services/:serviceName/apis/:apiName/providers/:providerName/edit" element={<ProviderEditPage />} />
             </Routes>
           </AppShell.Main>
         </AppShell>
