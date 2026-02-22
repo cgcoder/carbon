@@ -62,6 +62,7 @@ function buildMockRequest(req: Request, entry: CachedEntry): MockRequest {
     apiName: entry.api.name,
     body,
     requestNumber: count,
+    timestamp: new Date().toISOString(),
   };
 }
 
@@ -294,6 +295,7 @@ router.all('*', async (req: Request, res: Response) => {
 
   // Find the first MockProviderConfig whose matcher passes.
   const mockReq = buildMockRequest(req, entry);
+  requestLogger.logMockRequest(mockReq);
 
   let matchedIndex = -1;
   for (let i = 0; i < api.providers.length; i++) {

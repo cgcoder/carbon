@@ -40,6 +40,11 @@ export const createProject = (ws: string, data: { name: string; displayName?: st
     method: 'POST',
     body: JSON.stringify(data),
   });
+export const updateProject = (ws: string, name: string, data: { displayName?: string; description?: string }) =>
+  request<Project>(`/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
 export const deleteProject = (ws: string, name: string) =>
   request<void>(`/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(name)}`, {
     method: 'DELETE',

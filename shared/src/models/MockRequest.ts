@@ -18,4 +18,6 @@ export interface MockRequest {
   /** Raw request body, if present. */
   body?: string;
   requestNumber: number; // Incrementing counter for each request received by the service, used for debugging and testing purposes.
+  /** ISO 8601 timestamp of when the request was received. */
+  timestamp: string;
 }

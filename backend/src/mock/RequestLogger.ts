@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { MockRequest } from '@carbon/shared';
 import { config } from '../config';
 
 export interface MockRequestLogEntry {
@@ -39,6 +40,10 @@ class RequestLogger {
       ? `${entry.project}/${entry.service}/${entry.apiName}/${entry.providerName}`
       : 'unmatched';
     console.log(`[mock] ${entry.method} ${entry.url} ${entry.statusCode} ${entry.durationMs}ms (${matchInfo})`);
+  }
+
+  logMockRequest(mockReq: MockRequest): void {
+    this.logStream.write(JSON.stringify(mockReq) + '\n');
   }
 
   getEntries(): MockRequestLogEntry[] {

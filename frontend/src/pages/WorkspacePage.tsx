@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Stack, SimpleGrid, Card, Text, Title, Button, Group, ActionIcon, Alert,
 } from '@mantine/core';
@@ -12,35 +13,35 @@ import * as api from '../api/client';
 export default function WorkspacePage() {
   const { activeWorkspace } = useWorkspace();
   const navigate = useNavigate();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [error, setError] = useState('');
+  const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
+  const [editProject, setEditProject] = useState<Project | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setError('');
-    try {
-      setProjects(await api.getProjects(activeWorkspace));
-    } catch (e: any) {
-      setError(e.message);
-    }
-  }, [activeWorkspace]);
+  const projectsKey = ['projects', activeWorkspace];
 
-  useEffect(() => { load(); }, [load]);
+  const { data: projects = [], error } = useQuery({
+    queryKey: projectsKey,
+    queryFn: () => api.getProjects(activeWorkspace),
+    enabled: !!activeWorkspace,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (name: string) => api.deleteProject(activeWorkspace, name),
+    onSuccess: () => {
+      setPendingDelete(null);
+      queryClient.invalidateQueries({ queryKey: projectsKey });
+    },
+  });
+
+  const handleEdit = (p: Project, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditProject(p);
+  };
 
   const handleDelete = (name: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setPendingDelete(name);
-  };
-
-  const confirmDelete = async () => {
-    if (!pendingDelete) return;
-    try {
-      await api.deleteProject(activeWorkspace, pendingDelete);
-      setProjects(ps => ps.filter(p => p.name !== pendingDelete));
-    } catch (err: any) {
-      setError(err.message);
-    }
   };
 
   return (
@@ -50,7 +51,11 @@ export default function WorkspacePage() {
         <Button onClick={() => setCreateOpen(true)}>New Project</Button>
       </Group>
 
-      {error && <Alert color="red" title="Error" onClose={() => setError('')} withCloseButton>{error}</Alert>}
+      {(error || deleteMutation.error) && (
+        <Alert color="red" title="Error" withCloseButton>
+          {((error || deleteMutation.error) as Error).message}
+        </Alert>
+      )}
 
       {projects.length === 0 ? (
         <Text c="dimmed">No projects yet — create one to get started.</Text>
@@ -65,15 +70,25 @@ export default function WorkspacePage() {
             >
               <Group justify="space-between" mb="xs" wrap="nowrap">
                 <Text fw={600} truncate>{p.displayName || p.name}</Text>
-                <ActionIcon
-                  color="red"
-                  variant="subtle"
-                  size="sm"
-                  onClick={e => handleDelete(p.name, e)}
-                  title="Delete project"
-                >
-                  ×
-                </ActionIcon>
+                <Group gap={4} wrap="nowrap" onClick={e => e.stopPropagation()}>
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    onClick={e => handleEdit(p, e)}
+                    title="Edit project"
+                  >
+                    ✎
+                  </ActionIcon>
+                  <ActionIcon
+                    color="red"
+                    variant="subtle"
+                    size="sm"
+                    onClick={e => handleDelete(p.name, e)}
+                    title="Delete project"
+                  >
+                    ×
+                  </ActionIcon>
+                </Group>
               </Group>
               <Text c="dimmed" size="sm" lineClamp={2}>
                 {p.description || 'No description'}
@@ -85,13 +100,27 @@ export default function WorkspacePage() {
 
       <CreateProjectModal
         opened={createOpen}
-        onClose={() => { setCreateOpen(false); load(); }}
+        onClose={() => {
+          setCreateOpen(false);
+          queryClient.invalidateQueries({ queryKey: projectsKey });
+        }}
       />
+
+      {editProject && (
+        <CreateProjectModal
+          opened={!!editProject}
+          project={editProject}
+          onClose={() => {
+            setEditProject(null);
+            queryClient.invalidateQueries({ queryKey: projectsKey });
+          }}
+        />
+      )}
 
       <ConfirmDeleteModal
         opened={!!pendingDelete}
         entityName={pendingDelete ?? ''}
-        onConfirm={confirmDelete}
+        onConfirm={() => deleteMutation.mutate(pendingDelete!)}
         onClose={() => setPendingDelete(null)}
       />
     </Stack>
