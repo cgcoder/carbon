@@ -26,6 +26,7 @@ const mockApp = express();
 mockApp.use(express.json({ limit: '70mb' }));
 mockApp.use(express.text());
 mockApp.use(express.urlencoded({ extended: true }));
+mockApp.use(express.raw({ type: 'multipart/*', limit: '70mb' }));
 mockApp.use(mockRouter);
 
 mockApp.listen(config.mockPort, () => {

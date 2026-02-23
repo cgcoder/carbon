@@ -5,8 +5,8 @@ import { javascript } from '@codemirror/lang-javascript';
 import { html } from '@codemirror/lang-html';
 import { Stack, Text, Group } from '@mantine/core';
 
-// ~19px per line × 50 lines
-const EXPANDED_HEIGHT = '950px';
+// ~19px per line × 26 lines
+const EXPANDED_HEIGHT = '500px';
 
 export type CodeLanguage = 'json' | 'javascript' | 'html' | 'text';
 

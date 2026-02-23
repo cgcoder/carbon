@@ -1,9 +1,10 @@
+import { useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, useForm, useFieldArray } from 'react-hook-form';
 import {
   Stack, Group, Title, Text, Button, Alert, Breadcrumbs, Anchor,
-  TextInput, Textarea, NumberInput, Loader, Badge, Switch, Menu,
+  TextInput, Textarea, NumberInput, Loader, Badge, Switch, Menu, Paper, ActionIcon,
 } from '@mantine/core';
 import { Api } from '@carbon/shared';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -50,6 +51,12 @@ export default function ProviderEditPage() {
   });
 
   const providerType = watch('providerType');
+  const isMultipart = watch('isMultipart');
+
+  const { fields: partFields, append: appendPart, remove: removePart } = useFieldArray({
+    control,
+    name: 'multipartParts',
+  });
 
   const COMMON_HEADERS = [
     'Content-Type: application/json',
@@ -94,6 +101,17 @@ export default function ProviderEditPage() {
     updateMutation.mutate(values);
   };
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSubmit(onSubmit)();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleSubmit]);
+
   if (isLoading) {
     return (
       <Stack align="center" mt="xl">
@@ -136,7 +154,7 @@ export default function ProviderEditPage() {
       </Group>
 
       <form onSubmit={handleSubmit(onSubmit)}>
-        <Stack>
+        <Stack pb={80}>
           {updateMutation.error && (
             <Alert color="red" title="Error">{updateMutation.error.message}</Alert>
           )}
@@ -244,29 +262,94 @@ export default function ProviderEditPage() {
           />
 
           {providerType === 'static' && (
-            <Controller
-              name="body"
-              control={control}
-              render={({ field: f }) => (
-                <CodeEditor
-                  label="Body"
-                  language="json"
-                  value={f.value}
-                  onChange={f.onChange}
-                  placeholder={'{"message": "ok"}'}
-                  description='Response body. Use Ctrl+F / Ctrl+H to search and replace.'
-                  actions={
+            <Stack gap="sm">
+              <Controller
+                name="isMultipart"
+                control={control}
+                render={({ field: f }) => (
+                  <Switch
+                    label="Multipart response"
+                    description="When enabled, the response is sent as multipart/mixed with the parts below instead of a single body."
+                    checked={f.value}
+                    onChange={e => f.onChange(e.currentTarget.checked)}
+                  />
+                )}
+              />
+
+              {!isMultipart && (
+                <Controller
+                  name="body"
+                  control={control}
+                  render={({ field: f }) => (
+                    <CodeEditor
+                      label="Body"
+                      language="json"
+                      value={f.value}
+                      onChange={f.onChange}
+                      placeholder={'{"message": "ok"}'}
+                      description='Response body. Use Ctrl+F / Ctrl+H to search and replace.'
+                      actions={
+                        <Button
+                          variant="light"
+                          size="compact-xs"
+                          onClick={() => handleFormatJson('body')}
+                        >
+                          Format JSON
+                        </Button>
+                      }
+                    />
+                  )}
+                />
+              )}
+
+              {isMultipart && (
+                <Stack gap="xs">
+                  <Group justify="space-between" align="center">
+                    <Text size="sm" fw={500}>Multipart Parts</Text>
                     <Button
                       variant="light"
                       size="compact-xs"
-                      onClick={() => handleFormatJson('body')}
+                      onClick={() => appendPart({ contentType: '', body: '' })}
                     >
-                      Format JSON
+                      + Add Part
                     </Button>
-                  }
-                />
+                  </Group>
+                  {partFields.length === 0 && (
+                    <Text size="sm" c="dimmed">No parts yet. Click "+ Add Part" to add one.</Text>
+                  )}
+                  {partFields.map((part, index) => (
+                    <Paper key={part.id} withBorder p="sm" radius="sm">
+                      <Stack gap="xs">
+                        <Group justify="space-between" align="center">
+                          <Text size="xs" fw={600} c="dimmed">Part {index + 1}</Text>
+                          <ActionIcon
+                            variant="subtle"
+                            color="red"
+                            size="sm"
+                            onClick={() => removePart(index)}
+                            aria-label="Remove part"
+                          >
+                            ✕
+                          </ActionIcon>
+                        </Group>
+                        <TextInput
+                          label="Content-Type"
+                          placeholder="application/json"
+                          {...register(`multipartParts.${index}.contentType`)}
+                        />
+                        <Textarea
+                          label="Body"
+                          placeholder="Part content"
+                          rows={3}
+                          styles={{ input: { fontFamily: 'monospace' } }}
+                          {...register(`multipartParts.${index}.body`)}
+                        />
+                      </Stack>
+                    </Paper>
+                  ))}
+                </Stack>
               )}
-            />
+            </Stack>
           )}
 
           {providerType === 'script' && (
@@ -353,10 +436,22 @@ export default function ProviderEditPage() {
             </>
           )}
 
-          <Group justify="flex-end">
+          <div style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            zIndex: 200,
+            display: 'flex',
+            gap: 8,
+            background: 'var(--mantine-color-body)',
+            borderRadius: 'var(--mantine-radius-md)',
+            boxShadow: 'var(--mantine-shadow-md)',
+            padding: '8px 12px',
+            border: '1px solid var(--mantine-color-default-border)',
+          }}>
             <Button variant="default" onClick={() => navigate(apiEditPath)}>Cancel</Button>
             <Button type="submit" loading={updateMutation.isPending}>Save</Button>
-          </Group>
+          </div>
         </Stack>
       </form>
     </Stack>

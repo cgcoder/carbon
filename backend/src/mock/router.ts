@@ -3,7 +3,7 @@ import Mustache from 'mustache';
 import axios, { AxiosResponseHeaders } from 'axios';
 import zlib from 'zlib';
 import { promisify } from 'util';
-import { StaticResponseProviderConfig, ScriptResponseProviderConfig, TemplateResponseProviderConfig, MockRequest, HttpMethod } from '@carbon/shared';
+import { StaticResponseProviderConfig, ScriptResponseProviderConfig, TemplateResponseProviderConfig, MockRequest, MockRequestPart, HttpMethod } from '@carbon/shared';
 
 const gunzip = promisify(zlib.gunzip);
 const inflate = promisify(zlib.inflate);
@@ -16,6 +16,58 @@ import { requestLogger } from './RequestLogger';
 
 const router = Router();
 type HeaderType = Record<string, string | string[]>
+
+function extractBoundary(contentType: string): string | null {
+  const match = contentType.match(/boundary=(?:"([^"]+)"|([^\s;,]+))/i);
+  return match ? (match[1] ?? match[2]) : null;
+}
+
+function parseMultipartMixed(rawBody: Buffer, boundary: string): MockRequestPart[] {
+  const parts: MockRequestPart[] = [];
+  // Use binary (latin1) to preserve byte values across the split
+  const bodyStr = rawBody.toString('binary');
+  const sections = bodyStr.split(`--${boundary}`);
+
+  let partIndex = 0;
+  for (const section of sections) {
+    // Skip preamble and final boundary (--)
+    if (!section.startsWith('\r\n') && !section.startsWith('\n')) continue;
+    if (section.trimStart().startsWith('--')) continue;
+
+    const content = section.replace(/^\r?\n/, '');
+    const sep = content.indexOf('\r\n\r\n');
+    if (sep === -1) continue;
+
+    const headersStr = content.substring(0, sep);
+    let partBody = content.substring(sep + 4);
+    if (partBody.endsWith('\r\n')) partBody = partBody.slice(0, -2);
+
+    const partHeaders: Record<string, string> = {};
+    for (const line of headersStr.split('\r\n')) {
+      const idx = line.indexOf(':');
+      if (idx > 0) {
+        partHeaders[line.slice(0, idx).trim().toLowerCase()] = line.slice(idx + 1).trim();
+      }
+    }
+
+    const contentType = partHeaders['content-type'] ?? 'text/plain';
+    const contentDisposition = partHeaders['content-disposition'] ?? '';
+    const contentId = partHeaders['content-id'] ?? '';
+
+    const name = contentId.replace(/^<|>$/g, '') || `part-${partIndex}`;
+    const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
+    const filename = filenameMatch ? filenameMatch[1] : undefined;
+
+    const isText = contentType.startsWith('text/') || contentType.includes('json') || contentType.includes('xml');
+    const partBuffer = Buffer.from(partBody, 'binary');
+    const data = isText ? partBuffer.toString('utf-8') : partBuffer.toString('base64');
+
+    parts.push({ name, filename, contentType, data, isBase64: !isText });
+    partIndex++;
+  }
+
+  return parts;
+}
 
 /** Per-service request counter, keyed by "workspace/project/service". */
 const requestCounters = new Map<string, number>();
@@ -47,8 +99,18 @@ function buildMockRequest(req: Request, entry: CachedEntry): MockRequest {
     }
   }
 
+  const rawContentType = req.headers['content-type'] ?? '';
+  const isMultipart = rawContentType.toLowerCase().includes('multipart/mixed');
+
   let body: string | undefined;
-  if (req.body !== undefined && req.body !== null && req.body !== '') {
+  let multipartParts: MockRequestPart[] | undefined;
+
+  if (isMultipart) {
+    const boundary = extractBoundary(rawContentType);
+    multipartParts = (boundary && Buffer.isBuffer(req.body))
+      ? parseMultipartMixed(req.body, boundary)
+      : [];
+  } else if (req.body !== undefined && req.body !== null && req.body !== '') {
     body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
   }
 
@@ -61,6 +123,7 @@ function buildMockRequest(req: Request, entry: CachedEntry): MockRequest {
     queryParameters,
     apiName: entry.api.name,
     body,
+    multipartParts,
     requestNumber: count,
     timestamp: new Date().toISOString(),
   };
@@ -76,6 +139,23 @@ async function handleStatic(
   for (const [key, value] of Object.entries(config.headers)) {
     res.setHeader(key, value);
   }
+
+  if (config.multipartParts && config.multipartParts.length > 0) {
+    const boundary = `CarbonMixed${Date.now()}`;
+    const lines: string[] = [];
+    for (const part of config.multipartParts) {
+      lines.push(`--${boundary}`);
+      lines.push(`Content-Type: ${part.contentType ?? 'text/plain'}`);
+      lines.push('');
+      lines.push(part.body);
+    }
+    lines.push(`--${boundary}--`);
+    const multipartBody = lines.join('\r\n');
+    res.setHeader('Content-Type', `multipart/mixed; boundary=${boundary}`);
+    res.send(multipartBody);
+    return;
+  }
+
   res.send(config.body);
 }
 
@@ -260,7 +340,9 @@ router.all('*', async (req: Request, res: Response) => {
   const startTime = Date.now();
 
   let rawBody: string | null = null;
-  if (req.body !== undefined && req.body !== null && req.body !== '') {
+  if ((req.headers['content-type'] ?? '').toLowerCase().includes('multipart/mixed')) {
+    rawBody = '[multipart/mixed]';
+  } else if (req.body !== undefined && req.body !== null && req.body !== '') {
     rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
   }
 

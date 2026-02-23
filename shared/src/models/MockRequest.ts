@@ -1,5 +1,13 @@
 import { HttpMethod } from './HttpMethod';
 
+export interface MockRequestPart {
+  name: string;
+  filename?: string;
+  contentType: string;
+  data: string;       // UTF-8 text or base64-encoded binary
+  isBase64: boolean;
+}
+
 export interface MockRequest {
   /** HTTP method of the incoming request. */
   method: HttpMethod;
@@ -17,6 +25,8 @@ export interface MockRequest {
   apiName?: string;
   /** Raw request body, if present. */
   body?: string;
+  /** Parsed multipart/form-data parts, if the request was multipart. */
+  multipartParts?: MockRequestPart[];
   requestNumber: number; // Incrementing counter for each request received by the service, used for debugging and testing purposes.
   /** ISO 8601 timestamp of when the request was received. */
   timestamp: string;

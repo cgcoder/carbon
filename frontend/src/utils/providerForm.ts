@@ -6,9 +6,15 @@ import {
   ScriptResponseProviderConfig,
   TemplateResponseProviderConfig,
   ProxyResponseProviderConfig,
+  MultipartResponsePart,
 } from '@carbon/shared';
 
 export type ProviderType = 'static' | 'script' | 'template' | 'proxy';
+
+export interface MultipartPartForm {
+  contentType: string;
+  body: string;
+}
 
 export interface ProviderFormItem {
   name: string;
@@ -18,6 +24,8 @@ export interface ProviderFormItem {
   statusCode: number;
   headersRaw: string;
   body: string;
+  isMultipart: boolean;
+  multipartParts: MultipartPartForm[];
   script: string;
   template: string;
   targetUrl: string;
@@ -34,6 +42,8 @@ export const DEFAULT_PROVIDER: ProviderFormItem = {
   statusCode: 200,
   headersRaw: 'Content-Type: application/json',
   body: '',
+  isMultipart: false,
+  multipartParts: [] as MultipartPartForm[],
   script: '',
   template: '',
   targetUrl: '',
@@ -76,6 +86,13 @@ export function mockProviderToForm(p: MockProviderConfig): ProviderFormItem {
     statusCode: hasBase ? (resp as StaticResponseProviderConfig).statusCode : 200,
     headersRaw: hasBase ? headersToRaw((resp as StaticResponseProviderConfig).headers) : '',
     body: resp.type === 'static' ? (resp as StaticResponseProviderConfig).body : '',
+    isMultipart: resp.type === 'static' ? !!((resp as StaticResponseProviderConfig).multipartParts?.length) : false,
+    multipartParts: resp.type === 'static'
+      ? ((resp as StaticResponseProviderConfig).multipartParts ?? []).map(p => ({
+          contentType: p.contentType ?? '',
+          body: p.body,
+        }))
+      : [],
     script: resp.type === 'script' ? (resp as ScriptResponseProviderConfig).script : '',
     template: resp.type === 'template' ? (resp as TemplateResponseProviderConfig).template : '',
     targetUrl: resp.type === 'proxy' ? (resp as ProxyResponseProviderConfig).targetUrl : '',
@@ -94,9 +111,22 @@ export function formToMockProviderConfig(item: ProviderFormItem): MockProviderCo
   };
   let provider: ResponseProviderConfig;
   switch (item.providerType) {
-    case 'static':
-      provider = { type: 'static', ...base, body: item.body };
+    case 'static': {
+      const multipartParts: MultipartResponsePart[] | undefined =
+        item.isMultipart && item.multipartParts.length > 0
+          ? item.multipartParts.map(p => ({
+              ...(p.contentType && { contentType: p.contentType }),
+              body: p.body,
+            }))
+          : undefined;
+      provider = {
+        type: 'static',
+        ...base,
+        body: item.isMultipart ? '' : item.body,
+        ...(multipartParts && { multipartParts }),
+      };
       break;
+    }
     case 'script':
       provider = { type: 'script', ...base, script: item.script };
       break;
