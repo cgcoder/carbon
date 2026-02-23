@@ -19,7 +19,7 @@ export interface MockRequestLogEntry {
 }
 
 const MAX_ENTRIES = 500;
-const BODY_LIMIT = 100;
+const BODY_LIMIT = 10000;
 
 class RequestLogger {
   private entries: MockRequestLogEntry[] = [];
