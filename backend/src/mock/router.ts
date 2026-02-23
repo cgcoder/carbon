@@ -111,7 +111,15 @@ function buildMockRequest(req: Request, entry: CachedEntry): MockRequest {
       ? parseMultipartMixed(req.body, boundary)
       : [];
   } else if (req.body !== undefined && req.body !== null && req.body !== '') {
-    body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    if (typeof req.body === 'string') {
+      body = req.body;
+    } else {
+      try {
+        body = JSON.stringify(req.body);
+      } catch {
+        body = String(req.body);
+      }
+    }
   }
 
   return {
@@ -343,7 +351,15 @@ router.all('*', async (req: Request, res: Response) => {
   if ((req.headers['content-type'] ?? '').toLowerCase().includes('multipart/mixed')) {
     rawBody = '[multipart/mixed]';
   } else if (req.body !== undefined && req.body !== null && req.body !== '') {
-    rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    if (typeof req.body === 'string') {
+      rawBody = req.body;
+    } else {
+      try {
+        rawBody = JSON.stringify(req.body);
+      } catch {
+        rawBody = String(req.body);
+      }
+    }
   }
 
   const result = matchRequest(req);
