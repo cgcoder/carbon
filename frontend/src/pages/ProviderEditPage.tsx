@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Controller, useForm } from 'react-hook-form';
 import {
   Stack, Group, Title, Text, Button, Alert, Breadcrumbs, Anchor,
-  TextInput, Textarea, NumberInput, Loader, Badge, Switch,
+  TextInput, Textarea, NumberInput, Loader, Badge, Switch, Menu,
 } from '@mantine/core';
 import { Api } from '@carbon/shared';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -12,6 +12,7 @@ import {
   ProviderFormItem, DEFAULT_PROVIDER, PROVIDER_TYPE_OPTIONS,
   mockProviderToForm, formToMockProviderConfig,
 } from '../utils/providerForm';
+import { CodeEditor } from '../components/CodeEditor';
 
 export default function ProviderEditPage() {
   const { projectName, serviceName, apiName, providerName } = useParams<{
@@ -44,11 +45,27 @@ export default function ProviderEditPage() {
     ? mockProviderToForm(existingProvider)
     : { ...DEFAULT_PROVIDER, providerType: initialType as ProviderFormItem['providerType'] };
 
-  const { register, handleSubmit, control, watch, formState: { errors } } = useForm<ProviderFormItem>({
+  const { register, handleSubmit, control, watch, setValue, getValues, formState: { errors } } = useForm<ProviderFormItem>({
     defaultValues,
   });
 
   const providerType = watch('providerType');
+
+  const COMMON_HEADERS = [
+    'Content-Type: application/json',
+    'Content-Type: text/plain; charset=utf-8',
+    'Content-Type: text/html; charset=utf-8',
+    'Content-Type: application/xml',
+    'Cache-Control: no-cache',
+    'Cache-Control: max-age=3600',
+    'Access-Control-Allow-Origin: *',
+    'X-Content-Type-Options: nosniff',
+  ];
+
+  const appendHeader = (header: string) => {
+    const current = getValues('headersRaw').trim();
+    setValue('headersRaw', current ? `${current}\n${header}` : header, { shouldDirty: true });
+  };
 
   const apiEditPath = `/projects/${encodeURIComponent(projectName!)}/services/${encodeURIComponent(serviceName!)}/apis/${encodeURIComponent(apiName!)}/edit`;
   const servicePath = `/projects/${encodeURIComponent(projectName!)}/services/${encodeURIComponent(serviceName!)}`;
@@ -92,6 +109,16 @@ export default function ProviderEditPage() {
 
   const typeLabel = PROVIDER_TYPE_OPTIONS.find(o => o.type === providerType)?.label ?? providerType;
   const pageTitle = isNew ? `New ${typeLabel} Provider` : `Edit Provider`;
+
+  const handleFormatJson = (fieldName: 'body') => {
+    const raw = getValues(fieldName);
+    try {
+      const formatted = JSON.stringify(JSON.parse(raw), null, 2);
+      setValue(fieldName, formatted, { shouldDirty: true });
+    } catch {
+      // leave as-is; invalid JSON — user will see syntax error in editor
+    }
+  };
 
   return (
     <Stack>
@@ -143,13 +170,20 @@ export default function ProviderEditPage() {
             required
           />
 
-          <Textarea
-            label="Matcher (optional)"
-            {...register('matcher')}
-            rows={3}
-            styles={{ input: { fontFamily: 'monospace' } }}
-            placeholder={"// Leave empty for catch-all\nreturn request.headers['x-env'] === 'staging';"}
-            description="JavaScript function body receiving (request: MockRequest). Return true to use this provider. Empty = always matches."
+          <Controller
+            name="matcher"
+            control={control}
+            render={({ field: f }) => (
+              <CodeEditor
+                label="Matcher (optional)"
+                language="javascript"
+                value={f.value}
+                onChange={f.onChange}
+                placeholder={"// Leave empty for catch-all\nreturn request.headers['x-env'] === 'staging';"}
+                description="JavaScript function body receiving (request: MockRequest). Return true to use this provider. Empty = always matches."
+                minHeight="80px"
+              />
+            )}
           />
 
           <Controller
@@ -166,13 +200,34 @@ export default function ProviderEditPage() {
             )}
           />
 
-          <Textarea
-            label="Response Headers (Key: Value per line)"
-            {...register('headersRaw')}
-            rows={2}
-            styles={{ input: { fontFamily: 'monospace' } }}
-            placeholder="Content-Type: application/json"
-          />
+          <Stack gap={4}>
+            <Group justify="space-between" align="center">
+              <Text size="sm" fw={500}>Response Headers (Key: Value per line)</Text>
+              <Menu shadow="md" width={280} position="bottom-end">
+                <Menu.Target>
+                  <Button variant="light" size="compact-xs">+ Add common header</Button>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  {COMMON_HEADERS.map(h => (
+                    <Menu.Item
+                      key={h}
+                      onClick={() => appendHeader(h)}
+                      fz="xs"
+                      ff="monospace"
+                    >
+                      {h}
+                    </Menu.Item>
+                  ))}
+                </Menu.Dropdown>
+              </Menu>
+            </Group>
+            <Textarea
+              {...register('headersRaw')}
+              rows={3}
+              styles={{ input: { fontFamily: 'monospace' } }}
+              placeholder="Content-Type: application/json"
+            />
+          </Stack>
 
           <Controller
             name="injectLatencyMs"
@@ -189,36 +244,68 @@ export default function ProviderEditPage() {
           />
 
           {providerType === 'static' && (
-            <Textarea
-              label="Body"
-              {...register('body')}
-              rows={8}
-              styles={{ input: { fontFamily: 'monospace' } }}
-              placeholder='{"message": "ok"}'
+            <Controller
+              name="body"
+              control={control}
+              render={({ field: f }) => (
+                <CodeEditor
+                  label="Body"
+                  language="json"
+                  value={f.value}
+                  onChange={f.onChange}
+                  placeholder={'{"message": "ok"}'}
+                  description='Response body. Use Ctrl+F / Ctrl+H to search and replace.'
+                  actions={
+                    <Button
+                      variant="light"
+                      size="compact-xs"
+                      onClick={() => handleFormatJson('body')}
+                    >
+                      Format JSON
+                    </Button>
+                  }
+                />
+              )}
             />
           )}
 
           {providerType === 'script' && (
-            <Textarea
-              label="Script"
-              {...register('script', { required: 'Script is required' })}
-              rows={8}
-              styles={{ input: { fontFamily: 'monospace' } }}
-              placeholder={"// Return a JSON-serialisable value\nreturn { message: 'ok', timestamp: Date.now() };"}
-              description="JavaScript function body executed to generate the response body. Receives (request: MockRequest)."
-              error={errors.script?.message}
+            <Controller
+              name="script"
+              rules={{ required: 'Script is required' }}
+              control={control}
+              render={({ field: f }) => (
+                <CodeEditor
+                  label="Script"
+                  language="javascript"
+                  value={f.value}
+                  onChange={f.onChange}
+                  placeholder={"// Return a JSON-serialisable value\nreturn { message: 'ok', timestamp: Date.now() };"}
+                  description="JavaScript function body executed to generate the response body. Receives (request: MockRequest). Use Ctrl+F / Ctrl+H to search and replace."
+                  error={errors.script?.message}
+                  required
+                />
+              )}
             />
           )}
 
           {providerType === 'template' && (
-            <Textarea
-              label="Template"
-              {...register('template', { required: 'Template is required' })}
-              rows={8}
-              styles={{ input: { fontFamily: 'monospace' } }}
-              placeholder='{"id": "{{request.path}}", "name": "{{name}}"}'
-              description="Mustache template rendered against the incoming request context."
-              error={errors.template?.message}
+            <Controller
+              name="template"
+              rules={{ required: 'Template is required' }}
+              control={control}
+              render={({ field: f }) => (
+                <CodeEditor
+                  label="Template"
+                  language="html"
+                  value={f.value}
+                  onChange={f.onChange}
+                  placeholder={'{"id": "{{request.path}}", "name": "{{name}}"}'}
+                  description="Mustache template rendered against the incoming request context. Use Ctrl+F / Ctrl+H to search and replace."
+                  error={errors.template?.message}
+                  required
+                />
+              )}
             />
           )}
 
@@ -232,22 +319,36 @@ export default function ProviderEditPage() {
                 error={errors.targetUrl?.message}
               />
 
-              <Textarea
-                label="Outgoing Request Builder (optional)"
-                {...register('outgoingRequestBuilderScript')}
-                rows={5}
-                styles={{ input: { fontFamily: 'monospace' } }}
-                placeholder={"// outgoing.url, outgoing.query, outgoing.body, outgoing.headers\noutgoing.headers['X-Forwarded-By'] = 'carbon';"}
-                description="JavaScript snippet that receives (request: MockRequest, proxyRequest: ProxyRequest). Mutate outgoing to customise the forwarded call."
+              <Controller
+                name="outgoingRequestBuilderScript"
+                control={control}
+                render={({ field: f }) => (
+                  <CodeEditor
+                    label="Outgoing Request Builder (optional)"
+                    language="javascript"
+                    value={f.value}
+                    onChange={f.onChange}
+                    placeholder={"// outgoing.url, outgoing.query, outgoing.body, outgoing.headers\noutgoing.headers['X-Forwarded-By'] = 'carbon';"}
+                    description="JavaScript snippet that receives (request: MockRequest, proxyRequest: ProxyRequest). Mutate outgoing to customise the forwarded call."
+                    minHeight="120px"
+                  />
+                )}
               />
 
-              <Textarea
-                label="Response Builder (optional)"
-                {...register('responseBuilderScript')}
-                rows={5}
-                styles={{ input: { fontFamily: 'monospace' } }}
-                placeholder={"// response.status, response.headers, response.body\nresponse.headers['X-Proxied-By'] = 'carbon';"}
-                description="JavaScript snippet that receives (request: MockRequest, response). Mutate response to transform the reply."
+              <Controller
+                name="responseBuilderScript"
+                control={control}
+                render={({ field: f }) => (
+                  <CodeEditor
+                    label="Response Builder (optional)"
+                    language="javascript"
+                    value={f.value}
+                    onChange={f.onChange}
+                    placeholder={"// response.status, response.headers, response.body\nresponse.headers['X-Proxied-By'] = 'carbon';"}
+                    description="JavaScript snippet that receives (request: MockRequest, response). Mutate response to transform the reply."
+                    minHeight="120px"
+                  />
+                )}
               />
             </>
           )}

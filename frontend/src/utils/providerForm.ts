@@ -32,7 +32,7 @@ export const DEFAULT_PROVIDER: ProviderFormItem = {
   matcher: '',
   providerType: 'static',
   statusCode: 200,
-  headersRaw: '',
+  headersRaw: 'Content-Type: application/json',
   body: '',
   script: '',
   template: '',
