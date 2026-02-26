@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { fileStore } from '../storage/FileStore';
-import { Project } from '@carbon/shared';
+import { Project, DEFAULT_SCENARIO } from '@carbon/shared';
 
 const router = Router({ mergeParams: true });
 
@@ -37,6 +37,7 @@ router.post('/', (req: Request, res: Response) => {
     displayName: displayName || name,
     description: description || '',
     workspace: ws,
+    scenarios: [DEFAULT_SCENARIO],
   };
   fileStore.saveProject(ws, project);
   res.status(201).json(project);
@@ -49,6 +50,9 @@ router.get('/:project', (req: Request, res: Response) => {
   if (!project) {
     res.status(404).json({ error: `Project "${projName}" not found` });
     return;
+  }
+  if (!project.scenarios) {
+    project.scenarios = [DEFAULT_SCENARIO];
   }
   res.json(project);
 });

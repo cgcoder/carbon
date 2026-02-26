@@ -3,11 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Stack, SimpleGrid, Card, Group, Title, Text, Button, Alert,
-  Anchor, Breadcrumbs, Badge, Divider,
+  Anchor, Breadcrumbs, Badge, Divider, ActionIcon,
 } from '@mantine/core';
-import { Service } from '@carbon/shared';
+import { Service, ProjectScenario, DEFAULT_SCENARIO_ID } from '@carbon/shared';
 import { useWorkspace } from '../context/WorkspaceContext';
 import CreateServiceModal from '../components/CreateServiceModal';
+import CreateScenarioModal from '../components/CreateScenarioModal';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
 import * as api from '../api/client';
 
@@ -16,19 +17,31 @@ export default function ProjectPage() {
   const { activeWorkspace } = useWorkspace();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createServiceOpen, setCreateServiceOpen] = useState(false);
   const [editService, setEditService] = useState<Service | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [pendingDeleteService, setPendingDeleteService] = useState<string | null>(null);
+  const [scenarioModalOpen, setScenarioModalOpen] = useState(false);
+  const [editScenario, setEditScenario] = useState<ProjectScenario | null>(null);
+  const [pendingDeleteScenario, setPendingDeleteScenario] = useState<string | null>(null);
 
   const servicesKey = ['services', activeWorkspace, projectName];
+  const projectKey = ['project', activeWorkspace, projectName];
 
-  const { data: services = [], error } = useQuery({
+  const { data: services = [], error: servicesError } = useQuery({
     queryKey: servicesKey,
     queryFn: () => api.getServices(activeWorkspace, projectName!),
     enabled: !!projectName,
   });
 
-  const deleteMutation = useMutation({
+  const { data: project } = useQuery({
+    queryKey: projectKey,
+    queryFn: () => api.getProject(activeWorkspace, projectName!),
+    enabled: !!projectName,
+  });
+
+  const scenarios = project?.scenarios ?? [];
+
+  const deleteServiceMutation = useMutation({
     mutationFn: (name: string) => api.deleteService(activeWorkspace, projectName!, name),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: servicesKey }),
   });
@@ -39,19 +52,34 @@ export default function ProjectPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: servicesKey }),
   });
 
-  const handleEdit = (service: Service, e: React.MouseEvent) => {
+  const deleteScenarioMutation = useMutation({
+    mutationFn: (id: string) => api.deleteScenario(activeWorkspace, projectName!, id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: projectKey }),
+  });
+
+  const handleEditService = (service: Service, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditService(service);
   };
 
-  const handleDelete = (name: string, e: React.MouseEvent) => {
+  const handleDeleteService = (name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setPendingDelete(name);
+    setPendingDeleteService(name);
   };
 
   const handleToggle = (s: Service, e: React.MouseEvent) => {
     e.stopPropagation();
     toggleMutation.mutate(s);
+  };
+
+  const handleOpenScenarioModal = (scenario?: ProjectScenario) => {
+    setEditScenario(scenario ?? null);
+    setScenarioModalOpen(true);
+  };
+
+  const handleCloseScenarioModal = () => {
+    setScenarioModalOpen(false);
+    setEditScenario(null);
   };
 
   return (
@@ -63,14 +91,69 @@ export default function ProjectPage() {
 
       <Group justify="space-between">
         <Title order={2}>{projectName}</Title>
-        <Button onClick={() => setCreateOpen(true)}>New Service</Button>
       </Group>
 
-      {(error || deleteMutation.error) && (
+      {(servicesError || deleteServiceMutation.error) && (
         <Alert color="red" title="Error" withCloseButton>
-          {((error || deleteMutation.error) as Error).message}
+          {((servicesError || deleteServiceMutation.error) as Error).message}
         </Alert>
       )}
+
+      {/* Scenarios section */}
+      <Stack gap="xs">
+        <Group justify="space-between" align="center">
+          <Title order={4}>Scenarios</Title>
+          <Button size="xs" onClick={() => handleOpenScenarioModal()}>New Scenario</Button>
+        </Group>
+        <Group gap="xs" wrap="wrap">
+          {scenarios.map(scenario => (
+            <Badge
+              key={scenario.id}
+              variant={scenario.id === DEFAULT_SCENARIO_ID ? 'filled' : 'light'}
+              size="lg"
+              pr={scenario.id === DEFAULT_SCENARIO_ID ? undefined : 4}
+              rightSection={
+                scenario.id !== DEFAULT_SCENARIO_ID ? (
+                  <Group gap={2} wrap="nowrap">
+                    <ActionIcon
+                      size="xs"
+                      variant="transparent"
+                      color="currentColor"
+                      onClick={() => handleOpenScenarioModal(scenario)}
+                      aria-label="Edit scenario"
+                    >
+                      ✏
+                    </ActionIcon>
+                    <ActionIcon
+                      size="xs"
+                      variant="transparent"
+                      color="currentColor"
+                      onClick={() => setPendingDeleteScenario(scenario.id)}
+                      aria-label="Delete scenario"
+                    >
+                      ✕
+                    </ActionIcon>
+                  </Group>
+                ) : undefined
+              }
+            >
+              {scenario.name}
+              {scenario.description ? ` — ${scenario.description}` : ''}
+            </Badge>
+          ))}
+          {scenarios.length === 0 && (
+            <Text size="sm" c="dimmed">No scenarios yet.</Text>
+          )}
+        </Group>
+      </Stack>
+
+      <Divider />
+
+      {/* Services section */}
+      <Group justify="space-between">
+        <Title order={4}>Services</Title>
+        <Button size="xs" onClick={() => setCreateServiceOpen(true)}>New Service</Button>
+      </Group>
 
       {services.length === 0 ? (
         <Text c="dimmed">No services yet — create one to get started.</Text>
@@ -119,7 +202,7 @@ export default function ProjectPage() {
                 <Button
                   variant="light"
                   size="xs"
-                  onClick={e => handleEdit(s, e)}
+                  onClick={e => handleEditService(s, e)}
                 >
                   Edit
                 </Button>
@@ -127,7 +210,7 @@ export default function ProjectPage() {
                   variant="light"
                   size="xs"
                   color="red"
-                  onClick={e => handleDelete(s.name, e)}
+                  onClick={e => handleDeleteService(s.name, e)}
                 >
                   Delete
                 </Button>
@@ -137,10 +220,10 @@ export default function ProjectPage() {
         </SimpleGrid>
       )}
 
-      {createOpen && (
+      {createServiceOpen && (
         <CreateServiceModal
-          opened={createOpen}
-          onClose={() => setCreateOpen(false)}
+          opened={createServiceOpen}
+          onClose={() => setCreateServiceOpen(false)}
         />
       )}
 
@@ -153,10 +236,28 @@ export default function ProjectPage() {
       )}
 
       <ConfirmDeleteModal
-        opened={!!pendingDelete}
-        entityName={pendingDelete ?? ''}
-        onConfirm={() => deleteMutation.mutate(pendingDelete!)}
-        onClose={() => setPendingDelete(null)}
+        opened={!!pendingDeleteService}
+        entityName={pendingDeleteService ?? ''}
+        onConfirm={() => deleteServiceMutation.mutate(pendingDeleteService!)}
+        onClose={() => setPendingDeleteService(null)}
+      />
+
+      {scenarioModalOpen && (
+        <CreateScenarioModal
+          opened={scenarioModalOpen}
+          onClose={handleCloseScenarioModal}
+          workspace={activeWorkspace}
+          projectName={projectName!}
+          scenario={editScenario ?? undefined}
+          projectKey={projectKey}
+        />
+      )}
+
+      <ConfirmDeleteModal
+        opened={!!pendingDeleteScenario}
+        entityName={scenarios.find(s => s.id === pendingDeleteScenario)?.name ?? ''}
+        onConfirm={() => deleteScenarioMutation.mutate(pendingDeleteScenario!)}
+        onClose={() => setPendingDeleteScenario(null)}
       />
     </Stack>
   );

@@ -1,3 +1,5 @@
+import { ProjectScenario } from './ProjectScenario';
+
 export interface Project {
   /** Immutable identifier used as the directory name. Cannot be changed after creation. */
   name: string;
@@ -6,4 +8,5 @@ export interface Project {
   description: string;
   /** Workspace this project belongs to. Defaults to "Default". */
   workspace: string;
+  scenarios?: ProjectScenario[];
 }

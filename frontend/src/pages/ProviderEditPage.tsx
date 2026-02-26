@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Controller, useForm, useFieldArray } from 'react-hook-form';
 import {
   Stack, Group, Title, Text, Button, Alert, Breadcrumbs, Anchor,
-  TextInput, Textarea, NumberInput, Loader, Badge, Switch, Menu, Paper, ActionIcon,
+  TextInput, Textarea, NumberInput, Loader, Badge, Switch, Menu, Paper, ActionIcon, MultiSelect,
 } from '@mantine/core';
 import { Api } from '@carbon/shared';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -32,12 +32,21 @@ export default function ProviderEditPage() {
   const apiFromState = (location.state as { api?: Api } | null)?.api;
 
   const apisKey = ['apis', activeWorkspace, projectName, serviceName];
+  const projectKey = ['project', activeWorkspace, projectName];
 
   const { data: apis, isLoading } = useQuery({
     queryKey: apisKey,
     queryFn: () => apiClient.getApis(activeWorkspace, projectName!, serviceName!),
     enabled: !apiFromState,
   });
+
+  const { data: project } = useQuery({
+    queryKey: projectKey,
+    queryFn: () => apiClient.getProject(activeWorkspace, projectName!),
+    enabled: !!projectName,
+  });
+
+  const scenarioOptions = (project?.scenarios ?? []).map(s => ({ value: s.id, label: s.name }));
 
   const existingApi = apiFromState ?? apis?.find(a => a.name === apiName);
   const existingProvider = isNew ? null : existingApi?.providers.find(p => p.name === providerName);
@@ -168,6 +177,22 @@ export default function ProviderEditPage() {
                 description="When disabled, this provider is skipped during request matching."
                 checked={f.value}
                 onChange={e => f.onChange(e.currentTarget.checked)}
+              />
+            )}
+          />
+
+          <Controller
+            name="scenarioIds"
+            control={control}
+            render={({ field: f }) => (
+              <MultiSelect
+                label="Attach to Scenarios"
+                description="This provider applies only when one of these scenarios is active. Leave empty to apply to all scenarios."
+                data={scenarioOptions}
+                value={f.value}
+                onChange={f.onChange}
+                placeholder="All scenarios"
+                clearable
               />
             )}
           />

@@ -1,4 +1,4 @@
-import { Workspace, Project, Service, Api } from '@carbon/shared';
+import { Workspace, Project, ProjectScenario, Service, Api } from '@carbon/shared';
 
 const BASE = '/api';
 
@@ -35,6 +35,8 @@ export const deleteWorkspace = (name: string) =>
 // Projects
 export const getProjects = (ws: string) =>
   request<Project[]>(`/workspaces/${encodeURIComponent(ws)}/projects`);
+export const getProject = (ws: string, proj: string) =>
+  request<Project>(`/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(proj)}`);
 export const createProject = (ws: string, data: { name: string; displayName?: string; description?: string }) =>
   request<Project>(`/workspaces/${encodeURIComponent(ws)}/projects`, {
     method: 'POST',
@@ -49,6 +51,23 @@ export const deleteProject = (ws: string, name: string) =>
   request<void>(`/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(name)}`, {
     method: 'DELETE',
   });
+
+// Scenarios
+export const createScenario = (ws: string, proj: string, data: { name: string; description: string }) =>
+  request<ProjectScenario>(
+    `/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(proj)}/scenarios`,
+    { method: 'POST', body: JSON.stringify(data) }
+  );
+export const updateScenario = (ws: string, proj: string, id: string, data: { name?: string; description?: string }) =>
+  request<ProjectScenario>(
+    `/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(proj)}/scenarios/${encodeURIComponent(id)}`,
+    { method: 'PUT', body: JSON.stringify(data) }
+  );
+export const deleteScenario = (ws: string, proj: string, id: string) =>
+  request<void>(
+    `/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(proj)}/scenarios/${encodeURIComponent(id)}`,
+    { method: 'DELETE' }
+  );
 
 // Services
 export const getServices = (ws: string, proj: string) =>

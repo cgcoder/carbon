@@ -96,6 +96,8 @@ export interface MockProviderConfig {
   provider: ResponseProviderConfig;
   /** When false this provider is skipped during request matching. Defaults to true when absent. */
   enabled?: boolean;
+  /** Scenario IDs this provider is associated with. Empty/undefined = applies to all scenarios. */
+  scenarioIds?: string[];
 }
 
 export interface Api {

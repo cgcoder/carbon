@@ -4,6 +4,7 @@ import workspaceRoutes from './workspaceRoutes';
 import projectRoutes from './projectRoutes';
 import serviceRoutes from './serviceRoutes';
 import apiRoutes from './apiRoutes';
+import scenarioRoutes from './scenarioRoutes';
 import { config } from '../config';
 
 const router = Router();
@@ -11,6 +12,7 @@ const router = Router();
 router.use('/active-workspace', activeWorkspaceRoutes);
 router.use('/workspaces', workspaceRoutes);
 router.use('/workspaces/:workspace/projects', projectRoutes);
+router.use('/workspaces/:workspace/projects/:project/scenarios', scenarioRoutes);
 router.use('/workspaces/:workspace/projects/:project/services', serviceRoutes);
 router.use('/workspaces/:workspace/projects/:project/services/:service/apis', apiRoutes);
 router.use('/config', (req, res) => {

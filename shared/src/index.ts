@@ -1,5 +1,6 @@
 export * from './models/Workspace';
 export * from './models/Project';
+export * from './models/ProjectScenario';
 export * from './models/Service';
 export * from './models/Api';
 export * from './models/MockRequest';

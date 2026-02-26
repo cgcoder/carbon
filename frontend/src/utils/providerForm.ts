@@ -32,6 +32,7 @@ export interface ProviderFormItem {
   injectLatencyMs: number;
   outgoingRequestBuilderScript: string;
   responseBuilderScript: string;
+  scenarioIds: string[];
 }
 
 export const DEFAULT_PROVIDER: ProviderFormItem = {
@@ -50,6 +51,7 @@ export const DEFAULT_PROVIDER: ProviderFormItem = {
   injectLatencyMs: 0,
   outgoingRequestBuilderScript: '',
   responseBuilderScript: '',
+  scenarioIds: ['default'],
 };
 
 export const PROVIDER_TYPE_OPTIONS: Array<{ type: ProviderType; label: string; description: string }> = [
@@ -99,6 +101,7 @@ export function mockProviderToForm(p: MockProviderConfig): ProviderFormItem {
     injectLatencyMs: hasBase ? ((resp as StaticResponseProviderConfig).injectLatencyMs ?? 0) : 0,
     outgoingRequestBuilderScript: resp.type === 'proxy' ? ((resp as ProxyResponseProviderConfig).outgoingRequestBuilderScript ?? '') : '',
     responseBuilderScript: resp.type === 'proxy' ? ((resp as ProxyResponseProviderConfig).responseBuilderScript ?? '') : '',
+    scenarioIds: p.scenarioIds ?? [],
   };
 }
 
@@ -144,5 +147,11 @@ export function formToMockProviderConfig(item: ProviderFormItem): MockProviderCo
       break;
   }
   const matcher: RequestMatcherFunction = { body: item.matcher };
-  return { name: item.name, enabled: item.enabled, matcher, provider };
+  return {
+    name: item.name,
+    enabled: item.enabled,
+    matcher,
+    provider,
+    ...(item.scenarioIds.length > 0 && { scenarioIds: item.scenarioIds }),
+  };
 }
