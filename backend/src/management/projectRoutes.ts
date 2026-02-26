@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { fileStore } from '../storage/FileStore';
-import { Project, DEFAULT_SCENARIO } from '@carbon/shared';
+import { Project, DEFAULT_SCENARIO, DEFAULT_SCENARIO_ID } from '@carbon/shared';
 
 const router = Router({ mergeParams: true });
 
@@ -38,6 +38,7 @@ router.post('/', (req: Request, res: Response) => {
     description: description || '',
     workspace: ws,
     scenarios: [DEFAULT_SCENARIO],
+    activeScenarioId: DEFAULT_SCENARIO_ID,
   };
   fileStore.saveProject(ws, project);
   res.status(201).json(project);
@@ -54,6 +55,9 @@ router.get('/:project', (req: Request, res: Response) => {
   if (!project.scenarios) {
     project.scenarios = [DEFAULT_SCENARIO];
   }
+  if (!project.activeScenarioId) {
+    project.activeScenarioId = DEFAULT_SCENARIO_ID;
+  }
   res.json(project);
 });
 
@@ -69,9 +73,17 @@ router.put('/:project', (req: Request, res: Response) => {
     res.status(404).json({ error: `Project "${projName}" not found` });
     return;
   }
-  const { displayName, description } = req.body;
+  const { displayName, description, activeScenarioId } = req.body;
   if (displayName !== undefined) project.displayName = displayName;
   if (description !== undefined) project.description = description;
+  if (activeScenarioId !== undefined) {
+    const scenarioExists = project.scenarios?.some(s => s.id === activeScenarioId);
+    if (!scenarioExists) {
+      res.status(400).json({ error: `Scenario "${activeScenarioId}" not found in project` });
+      return;
+    }
+    project.activeScenarioId = activeScenarioId;
+  }
   fileStore.saveProject(ws, project);
   res.json(project);
 });

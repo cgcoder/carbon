@@ -9,4 +9,5 @@ export interface Project {
   /** Workspace this project belongs to. Defaults to "Default". */
   workspace: string;
   scenarios?: ProjectScenario[];
+  activeScenarioId?: string;
 }
