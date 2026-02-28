@@ -3,7 +3,8 @@ import Mustache from 'mustache';
 import axios, { AxiosResponseHeaders } from 'axios';
 import zlib from 'zlib';
 import { promisify } from 'util';
-import { StaticResponseProviderConfig, ScriptResponseProviderConfig, TemplateResponseProviderConfig, MockRequest, MockRequestPart, HttpMethod } from '@carbon/shared';
+import { StaticResponseProviderConfig, ScriptResponseProviderConfig, TemplateResponseProviderConfig, MockRequest, MockRequestPart, HttpMethod, DEFAULT_SCENARIO_ID } from '@carbon/shared';
+import { fileStore } from '../storage/FileStore';
 
 const gunzip = promisify(zlib.gunzip);
 const inflate = promisify(zlib.inflate);
@@ -395,9 +396,13 @@ router.all('*', async (req: Request, res: Response) => {
   const mockReq = buildMockRequest(req, entry);
   requestLogger.logMockRequest(mockReq);
 
+  const activeScenarioId = fileStore.getProject(entry.workspace.name, entry.project.name)?.activeScenarioId ?? DEFAULT_SCENARIO_ID;
+
   let matchedIndex = -1;
   for (let i = 0; i < api.providers.length; i++) {
     if (api.providers[i].enabled === false) continue;
+    const providerScenarioIds = api.providers[i].scenarioIds;
+    if (providerScenarioIds && providerScenarioIds.length > 0 && !providerScenarioIds.includes(activeScenarioId)) continue;
     const compiled = entry.compiledProviders[i];
     if (compiled.matcher.matches(mockReq)) {
       matchedIndex = i;
