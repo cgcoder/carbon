@@ -105,7 +105,7 @@ export default function ProjectPage() {
         <Group gap="xs">
           <Select
             size="xs"
-            w={180}
+            w={360}
             placeholder="Active Scenario"
             data={scenarios.map(s => ({ value: s.id, label: s.name }))}
             value={project?.activeScenarioId ?? DEFAULT_SCENARIO_ID}
