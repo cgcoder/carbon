@@ -14,6 +14,8 @@ import { OutgoingRequest } from '../types/OutgoingRequest';
 import { CachedEntry, CompiledProvider } from './MockConfigCache';
 import { matchRequest } from './matcher';
 import { requestLogger } from './RequestLogger';
+import { logStreamInstance } from '../storage/LogStream';
+import { ResponseWrapper } from './ResponseWrapper';
 
 const router = Router();
 type HeaderType = Record<string, string | string[]>
@@ -77,8 +79,8 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function buildMockRequest(req: Request, entry: CachedEntry): MockRequest {
-  const serviceKey = `${entry.workspace.name}/${entry.project.name}/${entry.service.name}`;
+function buildMockRequest(req: Request, entry: CachedEntry | null): MockRequest {
+  const serviceKey = entry == null ? "unmatched" : `${entry.workspace.name}/${entry.project.name}/${entry.service.name}`;
   const count = (requestCounters.get(serviceKey) ?? 0) + 1;
   requestCounters.set(serviceKey, count);
 
@@ -130,7 +132,7 @@ function buildMockRequest(req: Request, entry: CachedEntry): MockRequest {
     hostname: req.hostname,
     headers,
     queryParameters,
-    apiName: entry.api.name,
+    apiName: entry?.api?.name ?? 'unmatched',
     body,
     multipartParts,
     requestNumber: count,
@@ -139,14 +141,14 @@ function buildMockRequest(req: Request, entry: CachedEntry): MockRequest {
 }
 
 async function handleStatic(
-  res: Response,
+  res: ResponseWrapper,
   config: StaticResponseProviderConfig,
   latencyMs: number
 ): Promise<void> {
   if (latencyMs > 0) await delay(latencyMs);
   res.status(config.statusCode);
   for (const [key, value] of Object.entries(config.headers)) {
-    res.setHeader(key, value);
+    res.setHeader(key, value as any);
   }
 
   if (config.multipartParts && config.multipartParts.length > 0) {
@@ -169,7 +171,7 @@ async function handleStatic(
 }
 
 async function handleScript(
-  res: Response,
+  res: ResponseWrapper,
   config: ScriptResponseProviderConfig,
   mockReq: MockRequest,
   latencyMs: number,
@@ -191,7 +193,7 @@ async function handleScript(
 
   res.status(config.statusCode);
   for (const [key, value] of Object.entries(config.headers)) {
-    res.setHeader(key, value);
+    res.setHeader(key, value as any);
   }
 
   if (typeof result === 'string') {
@@ -202,7 +204,7 @@ async function handleScript(
 }
 
 async function handleTemplate(
-  res: Response,
+  res: ResponseWrapper,
   config: TemplateResponseProviderConfig,
   mockReq: MockRequest,
   latencyMs: number
@@ -219,7 +221,7 @@ async function handleTemplate(
 
   res.status(config.statusCode);
   for (const [key, value] of Object.entries(config.headers)) {
-    res.setHeader(key, value);
+    res.setHeader(key, value as any);
   }
   res.send(rendered);
 }
@@ -243,7 +245,7 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 async function handleProxy(
-  res: Response,
+  res: ResponseWrapper,
   config: CompiledProxyResponseProviderConfig,
   mockReq: MockRequest,
   latencyMs: number
@@ -254,7 +256,7 @@ async function handleProxy(
   const forwardHeaders: Record<string, string> = {};
   for (const [key, value] of Object.entries(mockReq.headers)) {
     if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
-      forwardHeaders[key] = value;
+      forwardHeaders[key] = value as any;
     }
   }
 
@@ -336,7 +338,7 @@ async function handleProxy(
   }
 }
 
-function copyHeaderToResponse(res: Response<any, Record<string, any>>, headers: HeaderType) {
+function copyHeaderToResponse(res: ResponseWrapper, headers: HeaderType) {
   for (const [key, value] of Object.entries(headers)) {
     if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) continue;
     if (value !== undefined) {
@@ -347,6 +349,7 @@ function copyHeaderToResponse(res: Response<any, Record<string, any>>, headers: 
 
 router.all('*', async (req: Request, res: Response) => {
   const startTime = Date.now();
+  const responseWrapper = new ResponseWrapper(res);
 
   let rawBody: string | null = null;
   if ((req.headers['content-type'] ?? '').toLowerCase().includes('multipart/mixed')) {
@@ -385,7 +388,14 @@ router.all('*', async (req: Request, res: Response) => {
   });
 
   if (!result.matched) {
-    res.status(result.statusCode).json({ error: result.error });
+    responseWrapper.status(result.statusCode).json({ error: result.error });
+    logStreamInstance.addRequestResponse(
+      buildMockRequest(req, null),
+      responseWrapper,
+      "Mismatch",
+      "",
+      ""
+    );
     return;
   }
 
@@ -425,25 +435,33 @@ router.all('*', async (req: Request, res: Response) => {
 
   switch (providerConfig.type) {
     case 'static':
-      await handleStatic(res, providerConfig, latencyMs);
-      return;
+      await handleStatic(responseWrapper, providerConfig, latencyMs);
+      break;
 
     case 'script':
-      await handleScript(res, providerConfig, mockReq, latencyMs, compiled.compiledScriptFn);
-      return;
+      await handleScript(responseWrapper, providerConfig, mockReq, latencyMs, compiled.compiledScriptFn);
+      break;
 
     case 'template':
-      await handleTemplate(res, providerConfig, mockReq, latencyMs);
-      return;
+      await handleTemplate(responseWrapper, providerConfig, mockReq, latencyMs);
+      break;
 
     case 'proxy':
-      await handleProxy(res, compiled.compiledProxyConfig!, mockReq, latencyMs);
-      return;
+      await handleProxy(responseWrapper, compiled.compiledProxyConfig!, mockReq, latencyMs);
+      break;
 
     case 'scenario':
       res.status(501).json({ error: `Response provider type "scenario" is not yet implemented` });
-      return;
+      break;
   }
+
+  logStreamInstance.addRequestResponse(
+    mockReq,
+    responseWrapper,
+    entry.service.name,
+    entry.project.name,
+    entry.workspace.name
+  );
 });
 
 export default router;

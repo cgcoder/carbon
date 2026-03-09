@@ -22,6 +22,9 @@ export default function AppNav() {
           Carbon
         </Text>
         <Group gap="sm">
+          <Button variant="light" size="sm" onClick={() => navigate('/logs')}>
+            Logs
+          </Button>
           <Button variant="light" size="sm" onClick={() => setCreateOpen(true)}>
             New Workspace
           </Button>

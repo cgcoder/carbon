@@ -14,12 +14,12 @@ export type MatchResult =
  */
 export function matchRequest(req: Request): MatchResult {
   const method = req.method.toUpperCase();
-
+  
   for (const entry of mockConfigCache.getAll()) {
     const { service, api } = entry;
-
+    
     if (api.method !== method) continue;
-
+    
     if (service.matchHostName) {
       const reqHost = (req.headers['host'] ?? '').split(':')[0];
       if (reqHost !== service.hostname) continue;
@@ -28,7 +28,7 @@ export function matchRequest(req: Request): MatchResult {
     if (service.urlPrefix) {
       if (!req.path.startsWith(service.urlPrefix)) continue;
     }
-
+    
     const pathToMatch = service.urlPrefix
       ? req.path.slice(service.urlPrefix.length) || '/'
       : req.path;

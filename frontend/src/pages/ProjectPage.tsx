@@ -5,12 +5,13 @@ import {
   Stack, SimpleGrid, Card, Group, Title, Text, Button, Alert,
   Anchor, Breadcrumbs, Badge, Divider, Select,
 } from '@mantine/core';
-import { Service, ProjectScenario, DEFAULT_SCENARIO_ID } from '@carbon/shared';
+import { Service, ProjectScenario } from '@carbon/shared';
 import { useWorkspace } from '../context/WorkspaceContext';
 import CreateServiceModal from '../components/CreateServiceModal';
 import CreateScenarioModal from '../components/CreateScenarioModal';
 import ConfirmDeleteModal from '../components/ConfirmDeleteModal';
 import * as api from '../api/client';
+const DEFAULT_SCENARIO_ID = 'default';
 
 export default function ProjectPage() {
   const { projectName } = useParams<{ projectName: string }>();

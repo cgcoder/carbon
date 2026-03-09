@@ -1,4 +1,4 @@
-import { Workspace, Project, ProjectScenario, Service, Api } from '@carbon/shared';
+import { Workspace, Project, ProjectScenario, Service, Api, LogEntry } from '@carbon/shared';
 
 const BASE = '/api';
 
@@ -108,3 +108,7 @@ export const deleteApi = (ws: string, proj: string, svc: string, name: string) =
     `/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(proj)}/services/${encodeURIComponent(svc)}/apis/${encodeURIComponent(name)}`,
     { method: 'DELETE' }
   );
+
+// Logs
+export const getLogs = () =>
+  request<LogEntry[]>('/logs');

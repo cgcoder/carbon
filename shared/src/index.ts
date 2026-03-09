@@ -5,3 +5,5 @@ export * from './models/Service';
 export * from './models/Api';
 export * from './models/MockRequest';
 export * from './models/GlobalVars';
+export * from './models/ResponseLog';
+export * from './models/LogEntry';

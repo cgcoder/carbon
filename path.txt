@@ -1,0 +1,1649 @@
+diff --git a/.gitignore b/.gitignore
+index eef20a7..c322476 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -4,4 +4,3 @@ backend/data/
+ *.tsbuildinfo
+ .DS_Store
+ log.txt
+-log*.txt
+diff --git a/backend/src/management/logRoutes.ts b/backend/src/management/logRoutes.ts
+deleted file mode 100644
+index a32e69f..0000000
+--- a/backend/src/management/logRoutes.ts
++++ /dev/null
+@@ -1,90 +0,0 @@
+-import { Router, Request, Response } from 'express';
+-import { logStreamInstance } from '../storage/LogStream';
+-import { LogEntry } from '@carbon/shared';
+-
+-const router = Router();
+-
+-// Track active SSE clients
+-const clients = new Map<string, Response>();
+-let clientIdCounter = 0;
+-
+-// GET /logs - Returns all current logs
+-router.get('/', (_req: Request, res: Response) => {
+-  const logs = logStreamInstance.getAllLogs();
+-  res.json(logs);
+-});
+-
+-// GET /logs/stream - SSE endpoint for real-time streaming
+-router.get('/stream', (req: Request, res: Response) => {
+-  const clientId = `client-${++clientIdCounter}`;
+-
+-  // Set SSE headers
+-  res.setHeader('Content-Type', 'text/event-stream');
+-  res.setHeader('Cache-Control', 'no-cache');
+-  res.setHeader('Connection', 'keep-alive');
+-  res.setHeader('X-Accel-Buffering', 'no'); // Disable buffering for nginx
+-
+-  // Track this client
+-  clients.set(clientId, res);
+-
+-  // Send initial logs immediately
+-  const initialLogs = logStreamInstance.getAllLogs();
+-  const initialMessage = {
+-    type: 'initial',
+-    logs: initialLogs
+-  };
+-  res.write(`data: ${JSON.stringify(initialMessage)}\n\n`);
+-
+-  // Listen for new log events
+-  const onLog = (logEntry: LogEntry) => {
+-    const message = {
+-      type: 'log',
+-      log: logEntry
+-    };
+-    try {
+-      res.write(`data: ${JSON.stringify(message)}\n\n`);
+-    } catch (error) {
+-      // Client disconnected, will be cleaned up below
+-    }
+-  };
+-
+-  // Listen for clear events
+-  const onCleared = () => {
+-    const message = {
+-      type: 'cleared'
+-    };
+-    try {
+-      res.write(`data: ${JSON.stringify(message)}\n\n`);
+-    } catch (error) {
+-      // Client disconnected, will be cleaned up below
+-    }
+-  };
+-
+-  logStreamInstance.on('log', onLog);
+-  logStreamInstance.on('cleared', onCleared);
+-
+-  // Keep-alive heartbeat every 30 seconds
+-  const heartbeat = setInterval(() => {
+-    try {
+-      res.write(': heartbeat\n\n');
+-    } catch (error) {
+-      clearInterval(heartbeat);
+-    }
+-  }, 30000);
+-
+-  // Clean up on client disconnect
+-  req.on('close', () => {
+-    clearInterval(heartbeat);
+-    logStreamInstance.off('log', onLog);
+-    logStreamInstance.off('cleared', onCleared);
+-    clients.delete(clientId);
+-  });
+-});
+-
+-// POST /logs/clear - Clear all logs
+-router.post('/clear', (_req: Request, res: Response) => {
+-  logStreamInstance.clearLogs();
+-  res.json({ success: true });
+-});
+-
+-export default router;
+diff --git a/backend/src/management/router.ts b/backend/src/management/router.ts
+index 66b58ea..798c2e2 100644
+--- a/backend/src/management/router.ts
++++ b/backend/src/management/router.ts
+@@ -5,13 +5,11 @@ import projectRoutes from './projectRoutes';
+ import serviceRoutes from './serviceRoutes';
+ import apiRoutes from './apiRoutes';
+ import scenarioRoutes from './scenarioRoutes';
+-import logRoutes from './logRoutes';
+ import { config } from '../config';
+ 
+ const router = Router();
+ 
+ router.use('/active-workspace', activeWorkspaceRoutes);
+-router.use('/logs', logRoutes);
+ router.use('/workspaces', workspaceRoutes);
+ router.use('/workspaces/:workspace/projects', projectRoutes);
+ router.use('/workspaces/:workspace/projects/:project/scenarios', scenarioRoutes);
+diff --git a/backend/src/mock/ResponseWrapper.ts b/backend/src/mock/ResponseWrapper.ts
+deleted file mode 100644
+index cdace68..0000000
+--- a/backend/src/mock/ResponseWrapper.ts
++++ /dev/null
+@@ -1,58 +0,0 @@
+-import { Response} from 'express';
+-
+-function stringify(data: unknown): string {
+-    if (typeof data === 'string') {
+-        return data;
+-    }
+-    try {
+-        return JSON.stringify(data);
+-    } catch {
+-        try {
+-            return String(data);
+-        } catch {
+-            
+-        }
+-    }
+-
+-    return '[unstringifiable data]';
+-}
+-
+-export class ResponseWrapper {
+-    private responseObj: Response;
+-    private responseBody: string;
+-
+-    constructor(response: Response) {
+-        this.responseObj = response;
+-        this.responseBody = '';
+-    }
+-
+-    public response(): Response {
+-        return this.responseObj;
+-    }
+-
+-    public status(code: number): ResponseWrapper {
+-        this.responseObj.status(code);
+-        return this;
+-    }
+-
+-    public json(data: unknown): ResponseWrapper {
+-        this.responseObj.json(data);
+-        this.responseBody = stringify(data);
+-        return this;
+-    }
+-
+-    public setHeader(name: string, value: string | number | readonly string[]): ResponseWrapper {
+-        this.responseObj.setHeader(name, value as any);
+-        return this;
+-    }
+-
+-    public responseBodyString(): string {
+-        return this.responseBody;
+-    }
+-
+-    public send(data: unknown): ResponseWrapper {
+-        this.responseObj.send(data);
+-        this.responseBody = stringify(data);
+-        return this;
+-    }
+-}
+\ No newline at end of file
+diff --git a/backend/src/mock/matcher.ts b/backend/src/mock/matcher.ts
+index a60c8f6..fbaa1d3 100644
+--- a/backend/src/mock/matcher.ts
++++ b/backend/src/mock/matcher.ts
+@@ -14,12 +14,12 @@ export type MatchResult =
+  */
+ export function matchRequest(req: Request): MatchResult {
+   const method = req.method.toUpperCase();
+-  
++
+   for (const entry of mockConfigCache.getAll()) {
+     const { service, api } = entry;
+-    
++
+     if (api.method !== method) continue;
+-    
++
+     if (service.matchHostName) {
+       const reqHost = (req.headers['host'] ?? '').split(':')[0];
+       if (reqHost !== service.hostname) continue;
+@@ -28,7 +28,7 @@ export function matchRequest(req: Request): MatchResult {
+     if (service.urlPrefix) {
+       if (!req.path.startsWith(service.urlPrefix)) continue;
+     }
+-    
++
+     const pathToMatch = service.urlPrefix
+       ? req.path.slice(service.urlPrefix.length) || '/'
+       : req.path;
+diff --git a/backend/src/mock/router.ts b/backend/src/mock/router.ts
+index 80e443e..59b43ce 100644
+--- a/backend/src/mock/router.ts
++++ b/backend/src/mock/router.ts
+@@ -14,8 +14,6 @@ import { OutgoingRequest } from '../types/OutgoingRequest';
+ import { CachedEntry, CompiledProvider } from './MockConfigCache';
+ import { matchRequest } from './matcher';
+ import { requestLogger } from './RequestLogger';
+-import { logStreamInstance } from '../storage/LogStream';
+-import { ResponseWrapper } from './ResponseWrapper';
+ 
+ const router = Router();
+ type HeaderType = Record<string, string | string[]>
+@@ -79,8 +77,8 @@ function delay(ms: number): Promise<void> {
+   return new Promise(resolve => setTimeout(resolve, ms));
+ }
+ 
+-function buildMockRequest(req: Request, entry: CachedEntry | null): MockRequest {
+-  const serviceKey = entry == null ? "unmatched" : `${entry.workspace.name}/${entry.project.name}/${entry.service.name}`;
++function buildMockRequest(req: Request, entry: CachedEntry): MockRequest {
++  const serviceKey = `${entry.workspace.name}/${entry.project.name}/${entry.service.name}`;
+   const count = (requestCounters.get(serviceKey) ?? 0) + 1;
+   requestCounters.set(serviceKey, count);
+ 
+@@ -132,7 +130,7 @@ function buildMockRequest(req: Request, entry: CachedEntry | null): MockRequest
+     hostname: req.hostname,
+     headers,
+     queryParameters,
+-    apiName: entry?.api?.name ?? 'unmatched',
++    apiName: entry.api.name,
+     body,
+     multipartParts,
+     requestNumber: count,
+@@ -141,14 +139,14 @@ function buildMockRequest(req: Request, entry: CachedEntry | null): MockRequest
+ }
+ 
+ async function handleStatic(
+-  res: ResponseWrapper,
++  res: Response,
+   config: StaticResponseProviderConfig,
+   latencyMs: number
+ ): Promise<void> {
+   if (latencyMs > 0) await delay(latencyMs);
+   res.status(config.statusCode);
+   for (const [key, value] of Object.entries(config.headers)) {
+-    res.setHeader(key, value as any);
++    res.setHeader(key, value);
+   }
+ 
+   if (config.multipartParts && config.multipartParts.length > 0) {
+@@ -171,7 +169,7 @@ async function handleStatic(
+ }
+ 
+ async function handleScript(
+-  res: ResponseWrapper,
++  res: Response,
+   config: ScriptResponseProviderConfig,
+   mockReq: MockRequest,
+   latencyMs: number,
+@@ -193,7 +191,7 @@ async function handleScript(
+ 
+   res.status(config.statusCode);
+   for (const [key, value] of Object.entries(config.headers)) {
+-    res.setHeader(key, value as any);
++    res.setHeader(key, value);
+   }
+ 
+   if (typeof result === 'string') {
+@@ -204,7 +202,7 @@ async function handleScript(
+ }
+ 
+ async function handleTemplate(
+-  res: ResponseWrapper,
++  res: Response,
+   config: TemplateResponseProviderConfig,
+   mockReq: MockRequest,
+   latencyMs: number
+@@ -221,7 +219,7 @@ async function handleTemplate(
+ 
+   res.status(config.statusCode);
+   for (const [key, value] of Object.entries(config.headers)) {
+-    res.setHeader(key, value as any);
++    res.setHeader(key, value);
+   }
+   res.send(rendered);
+ }
+@@ -245,7 +243,7 @@ const HOP_BY_HOP_HEADERS = new Set([
+ ]);
+ 
+ async function handleProxy(
+-  res: ResponseWrapper,
++  res: Response,
+   config: CompiledProxyResponseProviderConfig,
+   mockReq: MockRequest,
+   latencyMs: number
+@@ -256,7 +254,7 @@ async function handleProxy(
+   const forwardHeaders: Record<string, string> = {};
+   for (const [key, value] of Object.entries(mockReq.headers)) {
+     if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
+-      forwardHeaders[key] = value as any;
++      forwardHeaders[key] = value;
+     }
+   }
+ 
+@@ -338,7 +336,7 @@ async function handleProxy(
+   }
+ }
+ 
+-function copyHeaderToResponse(res: ResponseWrapper, headers: HeaderType) {
++function copyHeaderToResponse(res: Response<any, Record<string, any>>, headers: HeaderType) {
+   for (const [key, value] of Object.entries(headers)) {
+     if (HOP_BY_HOP_HEADERS.has(key.toLowerCase())) continue;
+     if (value !== undefined) {
+@@ -349,7 +347,6 @@ function copyHeaderToResponse(res: ResponseWrapper, headers: HeaderType) {
+ 
+ router.all('*', async (req: Request, res: Response) => {
+   const startTime = Date.now();
+-  const responseWrapper = new ResponseWrapper(res);
+ 
+   let rawBody: string | null = null;
+   if ((req.headers['content-type'] ?? '').toLowerCase().includes('multipart/mixed')) {
+@@ -388,14 +385,7 @@ router.all('*', async (req: Request, res: Response) => {
+   });
+ 
+   if (!result.matched) {
+-    responseWrapper.status(result.statusCode).json({ error: result.error });
+-    logStreamInstance.addRequestResponse(
+-      buildMockRequest(req, null),
+-      responseWrapper,
+-      "Mismatch",
+-      "",
+-      ""
+-    );
++    res.status(result.statusCode).json({ error: result.error });
+     return;
+   }
+ 
+@@ -435,33 +425,25 @@ router.all('*', async (req: Request, res: Response) => {
+ 
+   switch (providerConfig.type) {
+     case 'static':
+-      await handleStatic(responseWrapper, providerConfig, latencyMs);
+-      break;
++      await handleStatic(res, providerConfig, latencyMs);
++      return;
+ 
+     case 'script':
+-      await handleScript(responseWrapper, providerConfig, mockReq, latencyMs, compiled.compiledScriptFn);
+-      break;
++      await handleScript(res, providerConfig, mockReq, latencyMs, compiled.compiledScriptFn);
++      return;
+ 
+     case 'template':
+-      await handleTemplate(responseWrapper, providerConfig, mockReq, latencyMs);
+-      break;
++      await handleTemplate(res, providerConfig, mockReq, latencyMs);
++      return;
+ 
+     case 'proxy':
+-      await handleProxy(responseWrapper, compiled.compiledProxyConfig!, mockReq, latencyMs);
+-      break;
++      await handleProxy(res, compiled.compiledProxyConfig!, mockReq, latencyMs);
++      return;
+ 
+     case 'scenario':
+       res.status(501).json({ error: `Response provider type "scenario" is not yet implemented` });
+-      break;
++      return;
+   }
+-
+-  logStreamInstance.addRequestResponse(
+-    mockReq,
+-    responseWrapper,
+-    entry.service.name,
+-    entry.project.name,
+-    entry.workspace.name
+-  );
+ });
+ 
+ export default router;
+diff --git a/backend/src/storage/LogStream.ts b/backend/src/storage/LogStream.ts
+deleted file mode 100644
+index d637729..0000000
+--- a/backend/src/storage/LogStream.ts
++++ /dev/null
+@@ -1,60 +0,0 @@
+-import { MockRequest, ResponseLog } from "@carbon/shared";
+-import { ResponseWrapper } from "../mock/ResponseWrapper";
+-import { EventEmitter } from 'events';
+-
+-export interface LogEntry {
+-    request: MockRequest;
+-    response: ResponseLog;
+-    serviceName: string;
+-    projectName: string;
+-    workspaceName: string;
+-}
+-
+-export class LogStream extends EventEmitter {
+-    private index: number = 0;
+-    private logs: LogEntry[] = [];
+-
+-    addRequestResponse(
+-        request: MockRequest,
+-        response: ResponseWrapper,
+-        serviceName: string,
+-        projectName: string,
+-        workspaceName: string
+-    ): void {
+-        // For simplicity, we just log the method and URL. In a real implementation, you might want to log headers, body, etc.
+-
+-        const responseLog: ResponseLog = {
+-            status: response.response().statusCode,
+-            headers: response.response().getHeaders() as Record<string, string | number | string[]>,
+-            body: response.responseBodyString(),
+-        };
+-
+-        const logEntry: LogEntry = {
+-            request,
+-            response: responseLog,
+-            serviceName,
+-            projectName,
+-            workspaceName
+-        };
+-        this.logs.push(logEntry);
+-        if (this.logs.length > 200) {
+-            this.logs.shift();
+-        }
+-
+-        // Emit event for SSE listeners
+-        this.emit('log', logEntry);
+-    }
+-
+-    getAllLogs(): LogEntry[] {
+-        return [...this.logs]; // Return copy to prevent mutation
+-    }
+-
+-    clearLogs(): void {
+-        this.logs = [];
+-        this.emit('cleared');
+-    }
+-}
+-
+-
+-
+-export const logStreamInstance: LogStream = new LogStream();
+\ No newline at end of file
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 0bf741b..ce94564 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -7,7 +7,6 @@ import ProjectPage from './pages/ProjectPage';
+ import ServicePage from './pages/ServicePage';
+ import ApiPage from './pages/ApiPage';
+ import ProviderEditPage from './pages/ProviderEditPage';
+-import LogsPage from './pages/LogsPage';
+ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+ 
+ const queryClient = new QueryClient();
+@@ -23,7 +22,6 @@ export default function App() {
+           <AppShell.Main>
+             <Routes>
+               <Route path="/" element={<WorkspacePage />} />
+-              <Route path="/logs" element={<LogsPage />} />
+               <Route path="/projects/:projectName" element={<ProjectPage />} />
+               <Route path="/projects/:projectName/services/:serviceName" element={<ServicePage />} />
+               <Route path="/projects/:projectName/services/:serviceName/apis/new" element={<ApiPage />} />
+diff --git a/frontend/src/api/client.ts b/frontend/src/api/client.ts
+index 1ea201d..7522123 100644
+--- a/frontend/src/api/client.ts
++++ b/frontend/src/api/client.ts
+@@ -1,4 +1,4 @@
+-import { Workspace, Project, ProjectScenario, Service, Api, LogEntry } from '@carbon/shared';
++import { Workspace, Project, ProjectScenario, Service, Api } from '@carbon/shared';
+ 
+ const BASE = '/api';
+ 
+@@ -108,7 +108,3 @@ export const deleteApi = (ws: string, proj: string, svc: string, name: string) =
+     `/workspaces/${encodeURIComponent(ws)}/projects/${encodeURIComponent(proj)}/services/${encodeURIComponent(svc)}/apis/${encodeURIComponent(name)}`,
+     { method: 'DELETE' }
+   );
+-
+-// Logs
+-export const getLogs = () =>
+-  request<LogEntry[]>('/logs');
+diff --git a/frontend/src/components/AppNav.tsx b/frontend/src/components/AppNav.tsx
+index a81f4e4..3668a55 100644
+--- a/frontend/src/components/AppNav.tsx
++++ b/frontend/src/components/AppNav.tsx
+@@ -22,9 +22,6 @@ export default function AppNav() {
+           Carbon
+         </Text>
+         <Group gap="sm">
+-          <Button variant="light" size="sm" onClick={() => navigate('/logs')}>
+-            Logs
+-          </Button>
+           <Button variant="light" size="sm" onClick={() => setCreateOpen(true)}>
+             New Workspace
+           </Button>
+diff --git a/frontend/src/hooks/useLogStream.ts b/frontend/src/hooks/useLogStream.ts
+deleted file mode 100644
+index 3a77a80..0000000
+--- a/frontend/src/hooks/useLogStream.ts
++++ /dev/null
+@@ -1,73 +0,0 @@
+-import { useState, useEffect } from 'react';
+-import { useQuery } from '@tanstack/react-query';
+-import { LogEntry } from '@carbon/shared';
+-import { getLogs } from '../api/client';
+-
+-interface SSEMessage {
+-  type: 'initial' | 'log' | 'cleared';
+-  logs?: LogEntry[];
+-  log?: LogEntry;
+-}
+-
+-export function useLogStream() {
+-  const [logs, setLogs] = useState<LogEntry[]>([]);
+-
+-  // Fetch initial logs using react-query
+-  const { data: initialLogs, isLoading } = useQuery({
+-    queryKey: ['logs'],
+-    queryFn: getLogs,
+-    refetchOnWindowFocus: false,
+-  });
+-
+-  // Set initial logs when loaded
+-  useEffect(() => {
+-    if (initialLogs) {
+-      setLogs(initialLogs);
+-    }
+-  }, [initialLogs]);
+-
+-  // Connect to SSE stream
+-  useEffect(() => {
+-    const eventSource = new EventSource('/api/logs/stream');
+-
+-    eventSource.onmessage = (event) => {
+-      try {
+-        const message: SSEMessage = JSON.parse(event.data);
+-
+-        switch (message.type) {
+-          case 'initial':
+-            if (message.logs) {
+-              setLogs(message.logs);
+-            }
+-            break;
+-          case 'log':
+-            if (message.log) {
+-              setLogs((prev) => [...prev, message.log!]);
+-            }
+-            break;
+-          case 'cleared':
+-            setLogs([]);
+-            break;
+-        }
+-      } catch (error) {
+-        console.error('Failed to parse SSE message:', error);
+-      }
+-    };
+-
+-    eventSource.onerror = (error) => {
+-      console.error('SSE connection error:', error);
+-      // EventSource will automatically try to reconnect
+-    };
+-
+-    // Clean up on unmount
+-    return () => {
+-      eventSource.close();
+-    };
+-  }, []);
+-
+-  const clearLogs = () => {
+-    setLogs([]);
+-  };
+-
+-  return { logs, isLoading, clearLogs };
+-}
+diff --git a/frontend/src/pages/LogsPage.tsx b/frontend/src/pages/LogsPage.tsx
+deleted file mode 100644
+index 21df73d..0000000
+--- a/frontend/src/pages/LogsPage.tsx
++++ /dev/null
+@@ -1,248 +0,0 @@
+-import {
+-  Stack, Group, Title, Text, Button, Badge, Accordion, Code, ScrollArea, Box, MultiSelect,
+-} from '@mantine/core';
+-import { useState, useMemo } from 'react';
+-import { useQuery } from '@tanstack/react-query';
+-import { useLogStream } from '../hooks/useLogStream';
+-import { useWorkspace } from '../context/WorkspaceContext';
+-import { getProjects, getServices } from '../api/client';
+-
+-function formatTimestamp(isoString: string): string {
+-  const date = new Date(isoString);
+-  return date.toLocaleTimeString();
+-}
+-
+-function getStatusColor(status: number): string {
+-  if (status >= 200 && status < 300) return 'green';
+-  if (status >= 400 && status < 500) return 'yellow';
+-  if (status >= 500) return 'red';
+-  return 'gray';
+-}
+-
+-function formatHeaders(headers: Record<string, string | number | string[]>): string {
+-  return JSON.stringify(headers, null, 2);
+-}
+-
+-function formatBody(body: string): string {
+-  try {
+-    const parsed = JSON.parse(body);
+-    return JSON.stringify(parsed, null, 2);
+-  } catch {
+-    return body;
+-  }
+-}
+-
+-export default function LogsPage() {
+-  const { logs, isLoading, clearLogs } = useLogStream();
+-  const { activeWorkspace } = useWorkspace();
+-  const [selectedServices, setSelectedServices] = useState<string[]>([]);
+-  const [hiddenServices, setHiddenServices] = useState<string[]>([]);
+-
+-  // Fetch all projects in the active workspace
+-  const { data: projects = [] } = useQuery({
+-    queryKey: ['projects', activeWorkspace],
+-    queryFn: () => getProjects(activeWorkspace),
+-    enabled: !!activeWorkspace,
+-  });
+-
+-  // Fetch all services from all projects
+-  const { data: allServices = [] } = useQuery({
+-    queryKey: ['allServices', activeWorkspace, projects.map(p => p.name)],
+-    queryFn: async () => {
+-      const servicePromises = projects.map(project =>
+-        getServices(activeWorkspace, project.name)
+-      );
+-      const servicesArrays = await Promise.all(servicePromises);
+-      return servicesArrays.flat();
+-    },
+-    enabled: !!activeWorkspace && projects.length > 0,
+-  });
+-
+-  // Create service options for the dropdown
+-  const serviceOptions = useMemo(() => {
+-    return allServices.map(service => ({
+-      value: service.name,
+-      label: service.displayName || service.name,
+-    }));
+-  }, [allServices]);
+-
+-  // Filter logs based on selected and hidden services
+-  const filteredLogs = useMemo(() => {
+-    let result = logs;
+-    if (selectedServices.length > 0) {
+-      result = result.filter(log => selectedServices.includes(log.serviceName));
+-    }
+-    if (hiddenServices.length > 0) {
+-      result = result.filter(log => !hiddenServices.includes(log.serviceName));
+-    }
+-    return result;
+-  }, [logs, selectedServices, hiddenServices]);
+-
+-  if (isLoading) {
+-    return (
+-      <Stack>
+-        <Title order={2}>Request Logs</Title>
+-        <Text c="dimmed">Loading logs...</Text>
+-      </Stack>
+-    );
+-  }
+-
+-  return (
+-    <Stack>
+-      <Group justify="space-between">
+-        <Group>
+-          <Title order={2}>Request Logs</Title>
+-          <Badge size="lg" variant="light">
+-            {filteredLogs.length} {filteredLogs.length === 1 ? 'request' : 'requests'}
+-          </Badge>
+-        </Group>
+-        <Button variant="light" color="red" onClick={clearLogs}>
+-          Clear Logs
+-        </Button>
+-      </Group>
+-
+-      <Group grow>
+-        <MultiSelect
+-          label="Show Logs From Service"
+-          placeholder={selectedServices.length === 0 ? "All services" : "Select services"}
+-          data={serviceOptions}
+-          value={selectedServices}
+-          onChange={setSelectedServices}
+-          searchable
+-          clearable
+-          description={selectedServices.length === 0 ? "Showing logs from all services" : `Showing logs from ${selectedServices.length} selected service${selectedServices.length === 1 ? '' : 's'}`}
+-        />
+-        <MultiSelect
+-          label="Hide Logs From Service"
+-          placeholder={hiddenServices.length === 0 ? "All services" : "Select services"}
+-          data={serviceOptions}
+-          value={hiddenServices}
+-          onChange={setHiddenServices}
+-          searchable
+-          clearable
+-          description={hiddenServices.length === 0 ? "Not hidding logs" : `Hiding logs from ${hiddenServices.length} selected service${hiddenServices.length === 1 ? '' : 's'}`}
+-        />
+-      </Group>
+-
+-      {filteredLogs.length === 0 ? (
+-        <Text c="dimmed">
+-          {logs.length === 0
+-            ? "No requests logged yet. Make a request to the mock server on port 3000 to see logs appear here."
+-            : "No logs match the selected service filter."}
+-        </Text>
+-      ) : (
+-        <Accordion variant="separated">
+-          {filteredLogs.map((logEntry, index) => {
+-            const { request, response } = logEntry;
+-            const key = `${index}-${request.timestamp}`;
+-
+-            return (
+-              <Accordion.Item key={key} value={key}>
+-                <Accordion.Control>
+-                  <Group gap="xs" wrap="nowrap">
+-                    <Badge size="sm" variant="light" color="gray">
+-                      {formatTimestamp(request.timestamp)}
+-                    </Badge>
+-                    <Badge size="sm" variant="light" color="violet">
+-                      {logEntry.serviceName}
+-                    </Badge>
+-                    <Badge size="sm" variant="light" color="blue">
+-                      {request.method}
+-                    </Badge>
+-                    <Text size="sm" truncate style={{ flex: 1 }}>
+-                      {request.url}
+-                    </Text>
+-                    <Badge size="sm" variant="filled" color={getStatusColor(response.status)}>
+-                      {response.status}
+-                    </Badge>
+-                  </Group>
+-                </Accordion.Control>
+-
+-                <Accordion.Panel>
+-                  <Stack gap="md">
+-                    {/* Request Section */}
+-                    <Box>
+-                      <Text fw={600} mb="xs">Request</Text>
+-                      <Stack gap="xs">
+-                        <Group gap="xs">
+-                          <Text size="sm" fw={500} w={100}>Method:</Text>
+-                          <Badge size="sm" variant="light">{request.method}</Badge>
+-                        </Group>
+-
+-                        <Group gap="xs">
+-                          <Text size="sm" fw={500} w={100}>URL:</Text>
+-                          <Code>{request.url}</Code>
+-                        </Group>
+-
+-                        {request.hostname && (
+-                          <Group gap="xs">
+-                            <Text size="sm" fw={500} w={100}>Hostname:</Text>
+-                            <Code>{request.hostname}</Code>
+-                          </Group>
+-                        )}
+-
+-                        <Group gap="xs" align="flex-start">
+-                          <Text size="sm" fw={500} w={100}>Headers:</Text>
+-                          <ScrollArea.Autosize mah={150} style={{ flex: 1 }}>
+-                            <Code block>{formatHeaders(request.headers)}</Code>
+-                          </ScrollArea.Autosize>
+-                        </Group>
+-
+-                        {request.queryParameters && Object.keys(request.queryParameters).length > 0 && (
+-                          <Group gap="xs" align="flex-start">
+-                            <Text size="sm" fw={500} w={100}>Query Params:</Text>
+-                            <ScrollArea.Autosize mah={150} style={{ flex: 1 }}>
+-                              <Code block>{JSON.stringify(request.queryParameters, null, 2)}</Code>
+-                            </ScrollArea.Autosize>
+-                          </Group>
+-                        )}
+-
+-                        {request.body && (
+-                          <Group gap="xs" align="flex-start">
+-                            <Text size="sm" fw={500} w={100}>Body:</Text>
+-                            <ScrollArea.Autosize mah={300} style={{ flex: 1 }}>
+-                              <Code block>{formatBody(request.body)}</Code>
+-                            </ScrollArea.Autosize>
+-                          </Group>
+-                        )}
+-                      </Stack>
+-                    </Box>
+-
+-                    {/* Response Section */}
+-                    <Box>
+-                      <Text fw={600} mb="xs">Response</Text>
+-                      <Stack gap="xs">
+-                        <Group gap="xs">
+-                          <Text size="sm" fw={500} w={100}>Status:</Text>
+-                          <Badge size="sm" variant="filled" color={getStatusColor(response.status)}>
+-                            {response.status}
+-                          </Badge>
+-                        </Group>
+-
+-                        <Group gap="xs" align="flex-start">
+-                          <Text size="sm" fw={500} w={100}>Headers:</Text>
+-                          <ScrollArea.Autosize mah={150} style={{ flex: 1 }}>
+-                            <Code block>{formatHeaders(response.headers)}</Code>
+-                          </ScrollArea.Autosize>
+-                        </Group>
+-
+-                        {response.body && (
+-                          <Group gap="xs" align="flex-start">
+-                            <Text size="sm" fw={500} w={100}>Body:</Text>
+-                            <ScrollArea.Autosize mah={300} style={{ flex: 1 }}>
+-                              <Code block>{formatBody(response.body)}</Code>
+-                            </ScrollArea.Autosize>
+-                          </Group>
+-                        )}
+-                      </Stack>
+-                    </Box>
+-                  </Stack>
+-                </Accordion.Panel>
+-              </Accordion.Item>
+-            );
+-          })}
+-        </Accordion>
+-      )}
+-    </Stack>
+-  );
+-}
+diff --git a/package-lock.json b/package-lock.json
+index 8196a46..650497b 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -25,6 +25,7 @@
+         "axios": "^1.7.0",
+         "cors": "^2.8.5",
+         "express": "^4.21.0",
++        "multer": "^1.4.5-lts.1",
+         "mustache": "^4.2.0",
+         "path-to-regexp": "^8.2.0",
+         "uuid": "^11.0.0"
+@@ -32,6 +33,7 @@
+       "devDependencies": {
+         "@types/cors": "^2.8.17",
+         "@types/express": "^5.0.0",
++        "@types/multer": "^1.4.12",
+         "@types/mustache": "^4.2.6",
+         "@types/uuid": "^10.0.0",
+         "tsx": "^4.19.0",
+@@ -518,6 +520,474 @@
+         "w3c-keyname": "^2.2.4"
+       }
+     },
++    "node_modules/@esbuild/aix-ppc64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/aix-ppc64/-/aix-ppc64-0.27.3.tgz",
++      "integrity": "sha512-9fJMTNFTWZMh5qwrBItuziu834eOCUcEqymSH7pY+zoMVEZg3gcPuBNxH1EvfVYe9h0x/Ptw8KBzv7qxb7l8dg==",
++      "cpu": [
++        "ppc64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "aix"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/android-arm": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-arm/-/android-arm-0.27.3.tgz",
++      "integrity": "sha512-i5D1hPY7GIQmXlXhs2w8AWHhenb00+GxjxRncS2ZM7YNVGNfaMxgzSGuO8o8SJzRc/oZwU2bcScvVERk03QhzA==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/android-arm64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-arm64/-/android-arm64-0.27.3.tgz",
++      "integrity": "sha512-YdghPYUmj/FX2SYKJ0OZxf+iaKgMsKHVPF1MAq/P8WirnSpCStzKJFjOjzsW0QQ7oIAiccHdcqjbHmJxRb/dmg==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/android-x64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/android-x64/-/android-x64-0.27.3.tgz",
++      "integrity": "sha512-IN/0BNTkHtk8lkOM8JWAYFg4ORxBkZQf9zXiEOfERX/CzxW3Vg1ewAhU7QSWQpVIzTW+b8Xy+lGzdYXV6UZObQ==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "android"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/darwin-arm64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/darwin-arm64/-/darwin-arm64-0.27.3.tgz",
++      "integrity": "sha512-Re491k7ByTVRy0t3EKWajdLIr0gz2kKKfzafkth4Q8A5n1xTHrkqZgLLjFEHVD+AXdUGgQMq+Godfq45mGpCKg==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/darwin-x64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/darwin-x64/-/darwin-x64-0.27.3.tgz",
++      "integrity": "sha512-vHk/hA7/1AckjGzRqi6wbo+jaShzRowYip6rt6q7VYEDX4LEy1pZfDpdxCBnGtl+A5zq8iXDcyuxwtv3hNtHFg==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/freebsd-arm64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-arm64/-/freebsd-arm64-0.27.3.tgz",
++      "integrity": "sha512-ipTYM2fjt3kQAYOvo6vcxJx3nBYAzPjgTCk7QEgZG8AUO3ydUhvelmhrbOheMnGOlaSFUoHXB6un+A7q4ygY9w==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "freebsd"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/freebsd-x64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/freebsd-x64/-/freebsd-x64-0.27.3.tgz",
++      "integrity": "sha512-dDk0X87T7mI6U3K9VjWtHOXqwAMJBNN2r7bejDsc+j03SEjtD9HrOl8gVFByeM0aJksoUuUVU9TBaZa2rgj0oA==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "freebsd"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-arm": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm/-/linux-arm-0.27.3.tgz",
++      "integrity": "sha512-s6nPv2QkSupJwLYyfS+gwdirm0ukyTFNl3KTgZEAiJDd+iHZcbTPPcWCcRYH+WlNbwChgH2QkE9NSlNrMT8Gfw==",
++      "cpu": [
++        "arm"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-arm64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-arm64/-/linux-arm64-0.27.3.tgz",
++      "integrity": "sha512-sZOuFz/xWnZ4KH3YfFrKCf1WyPZHakVzTiqji3WDc0BCl2kBwiJLCXpzLzUBLgmp4veFZdvN5ChW4Eq/8Fc2Fg==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-ia32": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-ia32/-/linux-ia32-0.27.3.tgz",
++      "integrity": "sha512-yGlQYjdxtLdh0a3jHjuwOrxQjOZYD/C9PfdbgJJF3TIZWnm/tMd/RcNiLngiu4iwcBAOezdnSLAwQDPqTmtTYg==",
++      "cpu": [
++        "ia32"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-loong64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-loong64/-/linux-loong64-0.27.3.tgz",
++      "integrity": "sha512-WO60Sn8ly3gtzhyjATDgieJNet/KqsDlX5nRC5Y3oTFcS1l0KWba+SEa9Ja1GfDqSF1z6hif/SkpQJbL63cgOA==",
++      "cpu": [
++        "loong64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-mips64el": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-mips64el/-/linux-mips64el-0.27.3.tgz",
++      "integrity": "sha512-APsymYA6sGcZ4pD6k+UxbDjOFSvPWyZhjaiPyl/f79xKxwTnrn5QUnXR5prvetuaSMsb4jgeHewIDCIWljrSxw==",
++      "cpu": [
++        "mips64el"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-ppc64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-ppc64/-/linux-ppc64-0.27.3.tgz",
++      "integrity": "sha512-eizBnTeBefojtDb9nSh4vvVQ3V9Qf9Df01PfawPcRzJH4gFSgrObw+LveUyDoKU3kxi5+9RJTCWlj4FjYXVPEA==",
++      "cpu": [
++        "ppc64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-riscv64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-riscv64/-/linux-riscv64-0.27.3.tgz",
++      "integrity": "sha512-3Emwh0r5wmfm3ssTWRQSyVhbOHvqegUDRd0WhmXKX2mkHJe1SFCMJhagUleMq+Uci34wLSipf8Lagt4LlpRFWQ==",
++      "cpu": [
++        "riscv64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-s390x": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-s390x/-/linux-s390x-0.27.3.tgz",
++      "integrity": "sha512-pBHUx9LzXWBc7MFIEEL0yD/ZVtNgLytvx60gES28GcWMqil8ElCYR4kvbV2BDqsHOvVDRrOxGySBM9Fcv744hw==",
++      "cpu": [
++        "s390x"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/linux-x64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.27.3.tgz",
++      "integrity": "sha512-Czi8yzXUWIQYAtL/2y6vogER8pvcsOsk5cpwL4Gk5nJqH5UZiVByIY8Eorm5R13gq+DQKYg0+JyQoytLQas4dA==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/netbsd-arm64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-arm64/-/netbsd-arm64-0.27.3.tgz",
++      "integrity": "sha512-sDpk0RgmTCR/5HguIZa9n9u+HVKf40fbEUt+iTzSnCaGvY9kFP0YKBWZtJaraonFnqef5SlJ8/TiPAxzyS+UoA==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "netbsd"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/netbsd-x64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/netbsd-x64/-/netbsd-x64-0.27.3.tgz",
++      "integrity": "sha512-P14lFKJl/DdaE00LItAukUdZO5iqNH7+PjoBm+fLQjtxfcfFE20Xf5CrLsmZdq5LFFZzb5JMZ9grUwvtVYzjiA==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "netbsd"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/openbsd-arm64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-arm64/-/openbsd-arm64-0.27.3.tgz",
++      "integrity": "sha512-AIcMP77AvirGbRl/UZFTq5hjXK+2wC7qFRGoHSDrZ5v5b8DK/GYpXW3CPRL53NkvDqb9D+alBiC/dV0Fb7eJcw==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openbsd"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/openbsd-x64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/openbsd-x64/-/openbsd-x64-0.27.3.tgz",
++      "integrity": "sha512-DnW2sRrBzA+YnE70LKqnM3P+z8vehfJWHXECbwBmH/CU51z6FiqTQTHFenPlHmo3a8UgpLyH3PT+87OViOh1AQ==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openbsd"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/openharmony-arm64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/openharmony-arm64/-/openharmony-arm64-0.27.3.tgz",
++      "integrity": "sha512-NinAEgr/etERPTsZJ7aEZQvvg/A6IsZG/LgZy+81wON2huV7SrK3e63dU0XhyZP4RKGyTm7aOgmQk0bGp0fy2g==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "openharmony"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/sunos-x64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/sunos-x64/-/sunos-x64-0.27.3.tgz",
++      "integrity": "sha512-PanZ+nEz+eWoBJ8/f8HKxTTD172SKwdXebZ0ndd953gt1HRBbhMsaNqjTyYLGLPdoWHy4zLU7bDVJztF5f3BHA==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "sunos"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/win32-arm64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-arm64/-/win32-arm64-0.27.3.tgz",
++      "integrity": "sha512-B2t59lWWYrbRDw/tjiWOuzSsFh1Y/E95ofKz7rIVYSQkUYBjfSgf6oeYPNWHToFRr2zx52JKApIcAS/D5TUBnA==",
++      "cpu": [
++        "arm64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/win32-ia32": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-ia32/-/win32-ia32-0.27.3.tgz",
++      "integrity": "sha512-QLKSFeXNS8+tHW7tZpMtjlNb7HKau0QDpwm49u0vUp9y1WOF+PEzkU84y9GqYaAVW8aH8f3GcBck26jh54cX4Q==",
++      "cpu": [
++        "ia32"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
++    "node_modules/@esbuild/win32-x64": {
++      "version": "0.27.3",
++      "resolved": "https://registry.npmjs.org/@esbuild/win32-x64/-/win32-x64-0.27.3.tgz",
++      "integrity": "sha512-4uJGhsxuptu3OcpVAzli+/gWusVGwZZHTlS63hh++ehExkVT8SgiEf7/uC/PclrPPkLhZqGgCTjd0VWLo6xMqA==",
++      "cpu": [
++        "x64"
++      ],
++      "dev": true,
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ],
++      "peer": true,
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "node_modules/@floating-ui/core": {
+       "version": "1.7.4",
+       "resolved": "https://registry.npmjs.org/@floating-ui/core/-/core-1.7.4.tgz",
+@@ -1230,6 +1700,16 @@
+       "dev": true,
+       "license": "MIT"
+     },
++    "node_modules/@types/multer": {
++      "version": "1.4.13",
++      "resolved": "https://registry.npmjs.org/@types/multer/-/multer-1.4.13.tgz",
++      "integrity": "sha512-bhhdtPw7JqCiEfC9Jimx5LqX9BDIPJEh2q/fQ4bqbBPtyEZYr3cvF22NwG0DmPZNYA0CAf2CnqDB4KIGGpJcaw==",
++      "dev": true,
++      "license": "MIT",
++      "dependencies": {
++        "@types/express": "*"
++      }
++    },
+     "node_modules/@types/mustache": {
+       "version": "4.2.6",
+       "resolved": "https://registry.npmjs.org/@types/mustache/-/mustache-4.2.6.tgz",
+@@ -1430,6 +1910,12 @@
+         "url": "https://github.com/chalk/ansi-styles?sponsor=1"
+       }
+     },
++    "node_modules/append-field": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/append-field/-/append-field-1.0.0.tgz",
++      "integrity": "sha512-klpgFSWLW1ZEs8svjfb7g4qWY0YS5imI82dTg+QahUvJ8YqAY0P10Uk8tTyh9ZGuYEZEMaeJYCF5BFuX552hsw==",
++      "license": "MIT"
++    },
+     "node_modules/array-flatten": {
+       "version": "1.1.1",
+       "resolved": "https://registry.npmjs.org/array-flatten/-/array-flatten-1.1.1.tgz",
+@@ -1536,6 +2022,23 @@
+         "node": "^6 || ^7 || ^8 || ^9 || ^10 || ^11 || ^12 || >=13.7"
+       }
+     },
++    "node_modules/buffer-from": {
++      "version": "1.1.2",
++      "resolved": "https://registry.npmjs.org/buffer-from/-/buffer-from-1.1.2.tgz",
++      "integrity": "sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==",
++      "license": "MIT"
++    },
++    "node_modules/busboy": {
++      "version": "1.6.0",
++      "resolved": "https://registry.npmjs.org/busboy/-/busboy-1.6.0.tgz",
++      "integrity": "sha512-8SFQbg/0hQ9xy3UNTB0YEnsNBbWfhf7RtnzpL7TkBiTBRfrQ9Fxcnz7VJsleJpyp6rVLvXiuORqjlHi5q+PYuA==",
++      "dependencies": {
++        "streamsearch": "^1.1.0"
++      },
++      "engines": {
++        "node": ">=10.16.0"
++      }
++    },
+     "node_modules/bytes": {
+       "version": "3.1.2",
+       "resolved": "https://registry.npmjs.org/bytes/-/bytes-3.1.2.tgz",
+@@ -1706,6 +2209,21 @@
+         "node": ">= 0.8"
+       }
+     },
++    "node_modules/concat-stream": {
++      "version": "1.6.2",
++      "resolved": "https://registry.npmjs.org/concat-stream/-/concat-stream-1.6.2.tgz",
++      "integrity": "sha512-27HBghJxjiZtIk3Ycvn/4kbJk/1uZuJFfuPEns6LaEvpvG1f0hTea8lilrouyo9mVc2GWdcEZ8OLoGmSADlrCw==",
++      "engines": [
++        "node >= 0.8"
++      ],
++      "license": "MIT",
++      "dependencies": {
++        "buffer-from": "^1.0.0",
++        "inherits": "^2.0.3",
++        "readable-stream": "^2.2.2",
++        "typedarray": "^0.0.6"
++      }
++    },
+     "node_modules/concurrently": {
+       "version": "9.2.1",
+       "resolved": "https://registry.npmjs.org/concurrently/-/concurrently-9.2.1.tgz",
+@@ -1774,6 +2292,12 @@
+       "integrity": "sha512-NXdYc3dLr47pBkpUCHtKSwIOQXLVn8dZEuywboCOJY/osA0wFSLlSawr3KN8qXJEyX66FcONTH8EIlVuK0yyFA==",
+       "license": "MIT"
+     },
++    "node_modules/core-util-is": {
++      "version": "1.0.3",
++      "resolved": "https://registry.npmjs.org/core-util-is/-/core-util-is-1.0.3.tgz",
++      "integrity": "sha512-ZQBvi1DcpJ4GDqanjucZ2Hj3wEO5pZDS89BWbkcrvdxksJorwUDDZamX9ldFkp9aw2lmBDLgkObEA4DWNJ9FYQ==",
++      "license": "MIT"
++    },
+     "node_modules/cors": {
+       "version": "2.8.6",
+       "resolved": "https://registry.npmjs.org/cors/-/cors-2.8.6.tgz",
+@@ -2417,6 +2941,12 @@
+         "node": ">=8"
+       }
+     },
++    "node_modules/isarray": {
++      "version": "1.0.0",
++      "resolved": "https://registry.npmjs.org/isarray/-/isarray-1.0.0.tgz",
++      "integrity": "sha512-VLghIWNM6ELQzo7zwmcg0NmTVyWKYjvIeM83yjp0wRDTmUnrM678fQbcKBo6n2CJEF0szoG//ytg+TKla89ALQ==",
++      "license": "MIT"
++    },
+     "node_modules/js-tokens": {
+       "version": "4.0.0",
+       "resolved": "https://registry.npmjs.org/js-tokens/-/js-tokens-4.0.0.tgz",
+@@ -2540,12 +3070,52 @@
+         "node": ">= 0.6"
+       }
+     },
++    "node_modules/minimist": {
++      "version": "1.2.8",
++      "resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.8.tgz",
++      "integrity": "sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==",
++      "license": "MIT",
++      "funding": {
++        "url": "https://github.com/sponsors/ljharb"
++      }
++    },
++    "node_modules/mkdirp": {
++      "version": "0.5.6",
++      "resolved": "https://registry.npmjs.org/mkdirp/-/mkdirp-0.5.6.tgz",
++      "integrity": "sha512-FP+p8RB8OWpF3YZBCrP5gtADmtXApB5AMLn+vdyA+PyxCjrCs00mjyUozssO33cwDeT3wNGdLxJ5M//YqtHAJw==",
++      "license": "MIT",
++      "dependencies": {
++        "minimist": "^1.2.6"
++      },
++      "bin": {
++        "mkdirp": "bin/cmd.js"
++      }
++    },
+     "node_modules/ms": {
+       "version": "2.1.3",
+       "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
+       "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
+       "license": "MIT"
+     },
++    "node_modules/multer": {
++      "version": "1.4.5-lts.2",
++      "resolved": "https://registry.npmjs.org/multer/-/multer-1.4.5-lts.2.tgz",
++      "integrity": "sha512-VzGiVigcG9zUAoCNU+xShztrlr1auZOlurXynNvO9GiWD1/mTBbUljOKY+qMeazBqXgRnjzeEgJI/wyjJUHg9A==",
++      "deprecated": "Multer 1.x is impacted by a number of vulnerabilities, which have been patched in 2.x. You should upgrade to the latest 2.x version.",
++      "license": "MIT",
++      "dependencies": {
++        "append-field": "^1.0.0",
++        "busboy": "^1.0.0",
++        "concat-stream": "^1.5.2",
++        "mkdirp": "^0.5.4",
++        "object-assign": "^4.1.1",
++        "type-is": "^1.6.4",
++        "xtend": "^4.0.0"
++      },
++      "engines": {
++        "node": ">= 6.0.0"
++      }
++    },
+     "node_modules/mustache": {
+       "version": "4.2.0",
+       "resolved": "https://registry.npmjs.org/mustache/-/mustache-4.2.0.tgz",
+@@ -2817,6 +3387,12 @@
+         "postcss": "^8.2.1"
+       }
+     },
++    "node_modules/process-nextick-args": {
++      "version": "2.0.1",
++      "resolved": "https://registry.npmjs.org/process-nextick-args/-/process-nextick-args-2.0.1.tgz",
++      "integrity": "sha512-3ouUOpQhtgrbOa17J7+uxOTpITYWaGP7/AhoR3+A+/1e9skrzelGi/dXzEYyvbxubEF6Wn2ypscTKiKJFFn1ag==",
++      "license": "MIT"
++    },
+     "node_modules/proxy-addr": {
+       "version": "2.0.7",
+       "resolved": "https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.7.tgz",
+@@ -3054,6 +3630,27 @@
+         "react": "^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0"
+       }
+     },
++    "node_modules/readable-stream": {
++      "version": "2.3.8",
++      "resolved": "https://registry.npmjs.org/readable-stream/-/readable-stream-2.3.8.tgz",
++      "integrity": "sha512-8p0AUk4XODgIewSi0l8Epjs+EVnWiK7NoDIEGU0HhE7+ZyY8D1IMY7odu5lRrFXGg71L15KG8QrPmum45RTtdA==",
++      "license": "MIT",
++      "dependencies": {
++        "core-util-is": "~1.0.0",
++        "inherits": "~2.0.3",
++        "isarray": "~1.0.0",
++        "process-nextick-args": "~2.0.0",
++        "safe-buffer": "~5.1.1",
++        "string_decoder": "~1.1.1",
++        "util-deprecate": "~1.0.1"
++      }
++    },
++    "node_modules/readable-stream/node_modules/safe-buffer": {
++      "version": "5.1.2",
++      "resolved": "https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.1.2.tgz",
++      "integrity": "sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g==",
++      "license": "MIT"
++    },
+     "node_modules/require-directory": {
+       "version": "2.1.1",
+       "resolved": "https://registry.npmjs.org/require-directory/-/require-directory-2.1.1.tgz",
+@@ -3338,6 +3935,29 @@
+         "node": ">= 0.8"
+       }
+     },
++    "node_modules/streamsearch": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/streamsearch/-/streamsearch-1.1.0.tgz",
++      "integrity": "sha512-Mcc5wHehp9aXz1ax6bZUyY5afg9u2rv5cqQI3mRrYkGC8rW2hM02jWuwjtL++LS5qinSyhj2QfLyNsuc+VsExg==",
++      "engines": {
++        "node": ">=10.0.0"
++      }
++    },
++    "node_modules/string_decoder": {
++      "version": "1.1.1",
++      "resolved": "https://registry.npmjs.org/string_decoder/-/string_decoder-1.1.1.tgz",
++      "integrity": "sha512-n/ShnvDi6FHbbVfviro+WojiFzv+s8MPMHBczVePfUpDJLwoLT0ht1l4YwBCbi8pJAveEEdnkHyPyTP/mzRfwg==",
++      "license": "MIT",
++      "dependencies": {
++        "safe-buffer": "~5.1.0"
++      }
++    },
++    "node_modules/string_decoder/node_modules/safe-buffer": {
++      "version": "5.1.2",
++      "resolved": "https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.1.2.tgz",
++      "integrity": "sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g==",
++      "license": "MIT"
++    },
+     "node_modules/string-width": {
+       "version": "4.2.3",
+       "resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+@@ -3504,6 +4124,12 @@
+         "node": ">= 0.6"
+       }
+     },
++    "node_modules/typedarray": {
++      "version": "0.0.6",
++      "resolved": "https://registry.npmjs.org/typedarray/-/typedarray-0.0.6.tgz",
++      "integrity": "sha512-/aCDEGatGvZ2BIk+HmLf4ifCJFwvKFNb9/JeZPMulfgFracn9QFcAf5GO8B/mweUjSoblS5In0cWhqpfs/5PQA==",
++      "license": "MIT"
++    },
+     "node_modules/typescript": {
+       "version": "5.9.3",
+       "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+@@ -3657,7 +4283,6 @@
+       "version": "1.0.2",
+       "resolved": "https://registry.npmjs.org/util-deprecate/-/util-deprecate-1.0.2.tgz",
+       "integrity": "sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==",
+-      "dev": true,
+       "license": "MIT"
+     },
+     "node_modules/utils-merge": {
+@@ -4274,6 +4899,15 @@
+         "url": "https://github.com/chalk/wrap-ansi?sponsor=1"
+       }
+     },
++    "node_modules/xtend": {
++      "version": "4.0.2",
++      "resolved": "https://registry.npmjs.org/xtend/-/xtend-4.0.2.tgz",
++      "integrity": "sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=0.4"
++      }
++    },
+     "node_modules/y18n": {
+       "version": "5.0.8",
+       "resolved": "https://registry.npmjs.org/y18n/-/y18n-5.0.8.tgz",
+diff --git a/shared/src/index.ts b/shared/src/index.ts
+index 79fbe26..d16037f 100644
+--- a/shared/src/index.ts
++++ b/shared/src/index.ts
+@@ -4,6 +4,4 @@ export * from './models/ProjectScenario';
+ export * from './models/Service';
+ export * from './models/Api';
+ export * from './models/MockRequest';
+-export * from './models/GlobalVars';
+-export * from './models/ResponseLog';
+-export * from './models/LogEntry';
+\ No newline at end of file
++export * from './models/GlobalVars';
+\ No newline at end of file
+diff --git a/shared/src/models/LogEntry.ts b/shared/src/models/LogEntry.ts
+deleted file mode 100644
+index 7b97526..0000000
+--- a/shared/src/models/LogEntry.ts
++++ /dev/null
+@@ -1,10 +0,0 @@
+-import { MockRequest } from './MockRequest';
+-import { ResponseLog } from './ResponseLog';
+-
+-export interface LogEntry {
+-    request: MockRequest;
+-    response: ResponseLog;
+-    serviceName: string;
+-    projectName: string;
+-    workspaceName: string;
+-}
+diff --git a/shared/src/models/ResponseLog.ts b/shared/src/models/ResponseLog.ts
+deleted file mode 100644
+index 8925957..0000000
+--- a/shared/src/models/ResponseLog.ts
++++ /dev/null
+@@ -1,5 +0,0 @@
+-export interface ResponseLog {
+-    status: number;
+-    headers: Record<string, string | number | string[]>;
+-    body: string;
+-}
+\ No newline at end of file
